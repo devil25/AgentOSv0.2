@@ -3,7 +3,13 @@
   "name": "AgentOS Browser",
   "version": "0.2.0",
   "description": "A supervised browser agent bridge for Firefox and Windows.",
-  "permissions": ["tabs", "storage", "nativeMessaging", "activeTab"],
+  "permissions": [
+    "tabs",
+    "storage",
+    "nativeMessaging",
+    "activeTab",
+    "alarms"
+  ],
   "host_permissions": [
     "https://chat.z.ai/*",
     "https://chatgpt.com/*",
@@ -11,29 +17,45 @@
     "https://claude.ai/*",
     "https://gemini.google.com/*"
   ],
-  "background": {"scripts": ["background.js"]},
-  "action": {"default_title": "Open AgentOS"},
+  "background": {
+    "scripts": [
+      "action-parser.js",
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_title": "Open AgentOS"
+  },
   "sidebar_action": {
     "default_title": "AgentOS",
     "default_panel": "sidebar.html",
     "open_at_install": false
   },
-  "content_scripts": [{
-    "matches": [
-      "https://chat.z.ai/*",
-      "https://chatgpt.com/*",
-      "https://chat.openai.com/*",
-      "https://claude.ai/*",
-      "https://gemini.google.com/*"
-    ],
-    "js": ["provider-adapters.js", "content.js"],
-    "run_at": "document_idle"
-  }],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.z.ai/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "provider-adapters.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
   "browser_specific_settings": {
     "gecko": {
       "id": "agentos@example.local",
       "strict_min_version": "128.0",
-      "data_collection_permissions": {"required": ["none"]}
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
     }
   }
 }
