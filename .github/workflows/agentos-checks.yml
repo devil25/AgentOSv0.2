@@ -45,3 +45,13 @@ jobs:
           node --check extension/action-parser.js
           node --check extension/sidebar.js
           node --test extension/tests/action-parser.test.js extension/tests/provider-adapters.test.js
+      - name: Package unsigned Firefox XPI
+        run: |
+          cd extension
+          zip -qr ../AgentOS-Browser-0.2.2-unsigned.xpi .
+      - name: Upload unsigned Firefox XPI
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentOS-Browser-0.2.2-unsigned-xpi
+          path: AgentOS-Browser-0.2.2-unsigned.xpi
+          if-no-files-found: error
