@@ -36,10 +36,29 @@
     '[data-content-search-unit-key$=":assistant"]',
     '[data-markdown-text-style="assistant-message"]',
   ]);
+  const CHATGPT_RESPONSE_BODY_SELECTOR = "[data-response-body]";
+  const CHATGPT_MESSAGE_OWNER_SELECTOR = "[data-chatgpt-selection-message-id]";
+  const CHATGPT_MESSAGE_SOURCE_SELECTOR = "[data-dil-source-message-id]";
 
-  // Export the selector contract for Node tests without executing browser code.
+  // A response body, its selection owner and its rendered source must identify
+  // the same message. Conflicting IDs mean the DOM relationship is ambiguous.
+  function resolveChatGPTMessageId(responseBodyId, selectionMessageId, sourceMessageId) {
+    const ids = [responseBodyId, selectionMessageId, sourceMessageId]
+      .filter(value => typeof value === "string" && value.trim())
+      .map(value => value.trim());
+    if (!ids.length || new Set(ids).size !== 1) return null;
+    return ids[0];
+  }
+
+  // Export the selector/identity contract for Node tests without executing browser code.
   if (typeof module !== "undefined" && module.exports && typeof document === "undefined") {
-    module.exports = Object.freeze({ CHATGPT_ASSISTANT_SELECTORS });
+    module.exports = Object.freeze({
+      CHATGPT_ASSISTANT_SELECTORS,
+      CHATGPT_RESPONSE_BODY_SELECTOR,
+      CHATGPT_MESSAGE_OWNER_SELECTOR,
+      CHATGPT_MESSAGE_SOURCE_SELECTOR,
+      resolveChatGPTMessageId
+    });
     return;
   }
 
@@ -123,6 +142,41 @@
     return result;
   }
 
+  function readChatGPTAssistantEntries(composer) {
+    const bodies = unique([...document.querySelectorAll(CHATGPT_RESPONSE_BODY_SELECTOR)])
+      .filter(body => !isInsideComposer(body, composer));
+    const entries = [];
+
+    for (const body of bodies) {
+      // The role marker is the authority. data-response-body alone is only a
+      // boundary and must never be treated as proof that the author is ChatGPT.
+      const assistantNodes = [...body.querySelectorAll('[data-markdown-text-style="assistant-message"]')]
+        .filter(visible);
+      if (!assistantNodes.length) continue;
+
+      const responseBodyId = body.getAttribute("data-response-body");
+      for (const node of assistantNodes) {
+        const owner = node.closest(CHATGPT_MESSAGE_OWNER_SELECTOR);
+        const source = node.querySelector(CHATGPT_MESSAGE_SOURCE_SELECTOR) ||
+          body.querySelector(CHATGPT_MESSAGE_SOURCE_SELECTOR);
+        const messageId = resolveChatGPTMessageId(
+          responseBodyId,
+          owner?.getAttribute("data-chatgpt-selection-message-id"),
+          source?.getAttribute("data-dil-source-message-id")
+        );
+        if (!messageId) continue;
+
+        const text = cleanText(node);
+        if (text.length < 12 || text.length > 30000) continue;
+
+        const existing = entries.find(entry => entry.id === messageId);
+        if (existing) existing.text = text;
+        else entries.push({ id: messageId, text });
+      }
+    }
+    return entries;
+  }
+
   function hasChatGPTContinuationMarker() {
     if (provider?.id !== "chatgpt") return false;
     const lines = (document.body?.innerText || "")
@@ -135,6 +189,26 @@
   function readAssistantResponse() {
     const composer = findComposer();
     const continuationMarker = hasChatGPTContinuationMarker();
+
+    // New ChatGPT app-shell DOM: data-response-body provides the message
+    // boundary; the nested assistant-message marker proves authorship; the
+    // three matching IDs prevent mixing content from adjacent turns.
+    if (provider?.id === "chatgpt") {
+      const entries = readChatGPTAssistantEntries(composer);
+      if (entries.length) {
+        const latest = entries.slice(-12);
+        return {
+          ok: true,
+          messages: latest.map(entry => entry.text),
+          messageIds: latest.map(entry => entry.id),
+          strategy: "semantic selectors",
+          candidates: entries.length,
+          url: location.href,
+          continuationMarker
+        };
+      }
+    }
+
     const genericSemanticSelectors = [
       '[data-message-author-role="assistant"]',
       '[data-role="assistant"]',
@@ -172,6 +246,7 @@
       return {
         ok: true,
         messages: semantic.slice(-12).map(x => x.text),
+        messageIds: [],
         strategy: "semantic selectors",
         candidates: semantic.length,
         url: location.href,
@@ -410,7 +485,10 @@
     observerTimer = setTimeout(async () => {
       const snapshot = readAssistantResponse();
       if (!snapshot.ok || !snapshot.messages.length) return;
-      const signature = JSON.stringify(snapshot.messages);
+      const signature = JSON.stringify({
+        messageIds: snapshot.messageIds || [],
+        messages: snapshot.messages
+      });
       if (signature === lastObservedSignature) return;
       if (signature === stableSignature) stableCount += 1;
       else { stableSignature = signature; stableCount = 0; }
@@ -422,6 +500,7 @@
         const acknowledgement = await api.runtime.sendMessage({
           type: "AGENTOS_PROVIDER_SNAPSHOT",
           messages: snapshot.messages,
+          messageIds: snapshot.messageIds || [],
           url: snapshot.url || location.href,
           provider: provider?.id || "unknown",
           strategy: snapshot.strategy,
