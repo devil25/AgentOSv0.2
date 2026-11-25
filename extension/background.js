@@ -41,11 +41,13 @@ async function setActiveTask(taskId) {
   const state = stored[TASKS_KEY]?.[taskId];
   if (state) await api.storage.local.set({ [TASK_STATE_KEY]: state, [ACTIVE_TASK_KEY]: taskId });
 }
-function sameConversation(a, provider, url) {
-  try {
-    const oldUrl = new URL(a.providerUrl), newUrl = new URL(url);
-    return a.provider === provider && oldUrl.origin === newUrl.origin && oldUrl.pathname === newUrl.pathname;
-  } catch (_) { return a.provider === provider && a.providerUrl === url; }
+function sameConversation(a, provider, url, conversationId = null) {
+  if (a?.provider !== provider) return false;
+  if (a.providerUrl && url) {
+    try { const oldUrl = new URL(a.providerUrl), newUrl = new URL(url); if (oldUrl.origin === newUrl.origin && oldUrl.pathname === newUrl.pathname) return true; }
+    catch (_) { if (a.providerUrl === url) return true; }
+  } else if (a.providerUrl === url) return true;
+  return provider === "chatgpt" && typeof a.providerConversationId === "string" && a.providerConversationId.length > 0 && conversationId === a.providerConversationId;
 }
 function isChatGPTContinuationUrl(provider, url) {
   if (provider !== "chatgpt" || !url) return false;
@@ -65,7 +67,7 @@ async function taskStateForActiveTab() {
     const stored = await api.storage.local.get(TASKS_KEY);
     const tasks = Object.values(stored[TASKS_KEY] || {});
     const matches = tasks
-      .filter(state => state.provider === info.provider && sameConversation(state, info.provider, info.url))
+      .filter(state => state.provider === info.provider && sameConversation(state, info.provider, info.url, info.conversationId))
       .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     if (matches.length) {
       await setActiveTask(matches[0].id);
@@ -157,7 +159,8 @@ async function readProviderMessages(tabId) {
     messageIds,
     url: result.url || null,
     strategy: result.strategy || null,
-    continuationMarker: result.continuationMarker === true
+    continuationMarker: result.continuationMarker === true,
+    conversationId: result.conversationId || null
   };
 }
 function responseDelta(messages, baseline, messageIds = [], baselineMessageIds = []) {
@@ -227,6 +230,7 @@ async function sendPrompt(state, prompt) {
     ...state, phase: "submitting_prompt", prompt, baseline,
     baselineMessageIds: snapshot.messageIds || [],
     providerUrl: snapshot.url || state.providerUrl,
+    providerConversationId: snapshot.conversationId || state.providerConversationId || null,
     response: null, action: null, error: null
   });
   await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_FILL", { prompt });
@@ -382,7 +386,7 @@ async function processModelResponse(state, response) {
   await processAction(awaiting, true);
 }
 let responseProcessingTaskId = null;
-async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, continuationMarker = false, messageIds = []) {
+async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, continuationMarker = false, messageIds = [], conversationId = null) {
   let state = await readTaskState();
   // A timed-out task may still have a valid assistant response in the continued
   // ChatGPT conversation. Re-arm only this exact no-action/no-response timeout
@@ -399,7 +403,11 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
   if (!state || state.tabId !== tabId) {
     return { ok: true, accepted: true, reason: "no-task-for-tab" };
   }
-  if (rawUrl && !sameConversation(state, state.provider, rawUrl)) {
+  const verifiedChatGPTIdentity = state.provider === "chatgpt" && typeof state.providerConversationId === "string" && state.providerConversationId.length > 0 && conversationId === state.providerConversationId;
+  if (rawUrl && verifiedChatGPTIdentity && state.providerUrl !== rawUrl) {
+    state = await writeTaskState({ ...state, providerUrl: rawUrl, conversationTransfer: { ...(state.conversationTransfer || {}), from: state.providerUrl, to: rawUrl, observedUrl: rawUrl, verifiedBy: "chatgpt-dom-conversation-id", verifiedAt: new Date().toISOString() } });
+  }
+  if (rawUrl && !sameConversation(state, state.provider, rawUrl, conversationId)) {
     const verifiedChatGPTContinuation =
       state.phase === "awaiting_model" &&
       state.provider === "chatgpt" &&
@@ -478,6 +486,7 @@ async function startTask(message) {
   const state = {
     id, task: message.task, autonomy: message.autonomy === "autonomous" ? "autonomous" : "supervised",
     tabId: tab.id, provider: info.provider, providerUrl: info.url,
+    providerConversationId: info.conversationId || null,
     steps: 0, phase: "starting", startedAt: new Date().toISOString()
   };
   await setActiveTask(id);
@@ -492,16 +501,8 @@ async function reattachTaskTab(state) {
   const info = await tabRequest(tab.id, "AGENTOS_PROVIDER_INSPECT");
   if (!info?.ok || !info.composerAvailable) throw new Error("The active tab is not a supported AI conversation. Reopen the task's AI website first.");
   if (state.provider && info.provider !== state.provider) throw new Error("Open the same AI provider used by this task before resuming.");
-  if (state.providerUrl && info.url) {
-    try {
-      const previous = new URL(state.providerUrl);
-      const current = new URL(info.url);
-      if (previous.origin !== current.origin || previous.pathname !== current.pathname) {
-        throw new Error("Open the original AI conversation URL before resuming this task.");
-      }
-    } catch (error) {
-      if (error.message === "Open the original AI conversation URL before resuming this task.") throw error;
-    }
+  if (!sameConversation(state, info.provider, info.url, info.conversationId)) {
+    throw new Error("Open the original AI conversation before resuming this task. AgentOS could not verify its conversation identity.");
   }
   return { ...state, tabId: tab.id };
 }
@@ -518,7 +519,7 @@ async function resumeTask(taskId) {
     try {
       await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
       const snapshot = await readProviderMessages(resumed.tabId);
-      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url, snapshot.strategy, snapshot.continuationMarker, snapshot.messageIds);
+      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url, snapshot.strategy, snapshot.continuationMarker, snapshot.messageIds, snapshot.conversationId);
     } catch (_) {}
   } else if (state.phase === "paused" && state.resumePhase === "awaiting_approval") {
     const attached = await reattachTaskTab(state);
@@ -540,7 +541,7 @@ async function resumeTask(taskId) {
       const snapshot = await readProviderMessages(state.tabId);
       await handleAssistantSnapshot(
         state.tabId, snapshot.messages, snapshot.url, snapshot.strategy,
-        snapshot.continuationMarker, snapshot.messageIds
+        snapshot.continuationMarker, snapshot.messageIds, snapshot.conversationId
       );
     } catch (_) {}
   } else if (state.phase === "executing") {
@@ -612,7 +613,7 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_PROVIDER_FILL") return providerRequest("AGENTOS_PROVIDER_FILL", { prompt: message.prompt });
   if (message?.type === "AGENTOS_PROVIDER_SUBMIT") return providerRequest("AGENTOS_PROVIDER_SUBMIT");
   if (message?.type === "AGENTOS_PROVIDER_SNAPSHOT" && sender.tab?.id) {
-    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url, message.strategy, message.continuationMarker === true, message.messageIds || []).catch(async error => {
+    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url, message.strategy, message.continuationMarker === true, message.messageIds || [], message.conversationId || null).catch(async error => {
       const state = await readTaskState();
       if (state && state.tabId === sender.tab.id && state.phase === "awaiting_model") {
         await writeTaskState({ ...state, phase: "error", error: String(error.message || error) });
@@ -642,7 +643,7 @@ api.alarms.onAlarm.addListener(async alarm => {
       if (second.strategy === "semantic selectors" && firstSignature === secondSignature) {
         await handleAssistantSnapshot(
           state.tabId, second.messages, second.url, second.strategy,
-          second.continuationMarker, second.messageIds
+          second.continuationMarker, second.messageIds, second.conversationId
         );
       }
     }
