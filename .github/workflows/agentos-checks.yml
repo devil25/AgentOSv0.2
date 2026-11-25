@@ -38,4 +38,4 @@ jobs:
           node --check extension/provider-adapters.js
           node --check extension/action-parser.js
           node --check extension/sidebar.js
-          node --test extension/tests/action-parser.test.js
+          node --test extension/tests/action-parser.test.js extension/tests/provider-adapters.test.js
