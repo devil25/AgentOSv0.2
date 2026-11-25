@@ -1,0 +1,38 @@
+name: AgentOS release-candidate checks
+
+on:
+  push:
+    branches:
+      - v0.2-development
+  pull_request:
+    branches:
+      - v0.2-development
+  workflow_dispatch:
+
+jobs:
+  windows-checks:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run Python unit tests
+        shell: pwsh
+        run: python -m unittest discover -s runtime/tests -v
+      - name: Compile Python source
+        shell: pwsh
+        run: python -m compileall -q runtime
+      - name: Validate JSON configuration and protocol files
+        shell: pwsh
+        run: |
+          python -c "import json,pathlib; files=['extension/manifest.json','config/runtime.json','config/mcp_servers.example.json','protocol/action.schema.json','protocol/example-create-file.json']; [json.loads(pathlib.Path(p).read_text(encoding='utf-8')) for p in files]; print('JSON files are valid')"
+      - name: Check JavaScript syntax
+        shell: pwsh
+        run: |
+          node --check extension/background.js
+          node --check extension/content.js
+          node --check extension/provider-adapters.js
+          node --check extension/sidebar.js
