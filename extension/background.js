@@ -146,7 +146,15 @@ async function nativeRequest(payload) {
       finish({ ok: false, error: String(error) });
       return;
     }
-    const timeoutMs = payload?.type === "workspace.select_directory" ? 180000 : 15000;
+    const isTerminalAction = payload?.type === "action.execute" && payload.action === "terminal.execute";
+    const requestedTerminalTimeout = Number.isInteger(payload?.arguments?.timeout_seconds)
+      ? payload.arguments.timeout_seconds
+      : 120;
+    const timeoutMs = payload?.type === "workspace.select_directory"
+      ? 180000
+      : isTerminalAction
+        ? (Math.min(Math.max(requestedTerminalTimeout, 1), 600) + 15000) * 1000
+        : 15000;
     timer = setTimeout(() => finish({ ok: false, error: "Native host timeout" }), timeoutMs);
     port.onMessage.addListener(finish);
     port.onDisconnect.addListener(() => finish({
@@ -300,7 +308,12 @@ function validateAction(command) {
       } catch (_) { return "The URL is invalid."; }
       break;
     case "terminal.execute":
-      if (!text("command", false, 12000)) return "terminal.execute requires a command under 12 KB.";
+      if (!text("command", false, 100000)) return "terminal.execute requires a command under 100 KB.";
+      if (args.cwd !== undefined && !text("cwd", false, 1024)) return "terminal.execute cwd must be a directory path under 1024 characters.";
+      if (args.timeout_seconds !== undefined &&
+          (!Number.isInteger(args.timeout_seconds) || args.timeout_seconds < 1 || args.timeout_seconds > 600)) {
+        return "terminal.execute timeout_seconds must be an integer from 1 to 600.";
+      }
       break;
   }
   return null;
