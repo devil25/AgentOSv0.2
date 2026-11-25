@@ -93,7 +93,8 @@ async function nativeRequest(payload) {
       finish({ ok: false, error: String(error) });
       return;
     }
-    timer = setTimeout(() => finish({ ok: false, error: "Native host timeout" }), 15000);
+    const timeoutMs = payload?.type === "workspace.select_directory" ? 180000 : 15000;
+    timer = setTimeout(() => finish({ ok: false, error: "Native host timeout" }), timeoutMs);
     port.onMessage.addListener(finish);
     port.onDisconnect.addListener(() => finish({
       ok: false, error: api.runtime.lastError?.message || "Native host disconnected"
