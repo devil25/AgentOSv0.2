@@ -206,13 +206,38 @@
       )?.set;
       if (setter) setter.call(el, value);
       else el.value = value;
+      el.dispatchEvent(new InputEvent("input", {
+        bubbles: true, inputType: "insertText", data: value
+      }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    } else if (el.isContentEditable) {
+      // ChatGPT uses a ProseMirror editor. Mutating its DOM with replaceChildren()
+      // bypasses the editor's transaction/state and can leave the Send button
+      // looking ready even though the application has not accepted the prompt.
+      if (provider?.id === "chatgpt") {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const inserted = document.execCommand("insertText", false, value);
+        if (!inserted) {
+          throw new Error("ChatGPT's editor rejected text insertion; the prompt was not submitted.");
+        }
+        const actual = (el.innerText || el.textContent || "").replace(/\\u00a0/g, " ").trim();
+        if (!actual || !actual.includes(value.slice(0, Math.min(80, value.length)))) {
+          throw new Error("ChatGPT's editor did not retain the inserted prompt; the prompt was not submitted.");
+        }
+      } else {
+        el.replaceChildren(document.createTextNode(value));
+        el.dispatchEvent(new InputEvent("input", {
+          bubbles: true, inputType: "insertText", data: value
+        }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
     } else {
-      el.replaceChildren(document.createTextNode(value));
+      throw new Error("The detected message composer is not an editable text field.");
     }
-    el.dispatchEvent(new InputEvent("input", {
-      bubbles: true, inputType: "insertText", data: value
-    }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   function findSendButton(composer) {
@@ -303,15 +328,33 @@
   async function submitPrompt() {
     const composer = findComposer();
     if (!composer) throw new Error("Could not find the message composer on this page");
+    const beforeText = (composer.innerText || composer.value || composer.textContent || "").trim();
+    if (!beforeText) throw new Error("The message composer is empty; AgentOS will not submit an empty prompt.");
+    const beforeMessages = JSON.stringify(readAssistantResponse().messages);
     const button = findSendButton(composer);
+    let method = "send-button";
     if (button) {
       button.click();
-      return { ok: true, submitted: true, method: "send-button" };
+    } else {
+      method = "enter-key-fallback";
+      composer.focus();
+      composer.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter", code: "Enter", bubbles: true, cancelable: true
+      }));
     }
-    composer.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "Enter", code: "Enter", bubbles: true, cancelable: true
-    }));
-    return { ok: true, submitted: true, method: "enter-key-fallback" };
+
+    // A click is not proof that the provider accepted the prompt. Confirm that
+    // generation started, the editor cleared, or a new assistant turn appeared.
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const currentText = (composer.innerText || composer.value || composer.textContent || "").trim();
+      const messagesChanged = JSON.stringify(readAssistantResponse().messages) !== beforeMessages;
+      if (generationInProgress() || !currentText || messagesChanged) {
+        return { ok: true, submitted: true, verified: true, method };
+      }
+    }
+    throw new Error("The Send control was activated, but the AI website did not confirm submission within 10 seconds. The prompt was not resent.");
   }
 
   // Observe the provider page independently of the sidebar lifetime. A quiet,
