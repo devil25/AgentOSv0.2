@@ -538,7 +538,10 @@ async function resumeTask(taskId) {
     try {
       await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
       const snapshot = await readProviderMessages(state.tabId);
-      await handleAssistantSnapshot(state.tabId, snapshot.messages, snapshot.url, snapshot.strategy);
+      await handleAssistantSnapshot(
+        state.tabId, snapshot.messages, snapshot.url, snapshot.strategy,
+        snapshot.continuationMarker, snapshot.messageIds
+      );
     } catch (_) {}
   } else if (state.phase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "The browser stopped during an action. Its outcome is unknown; it was not replayed." });
