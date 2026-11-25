@@ -231,8 +231,6 @@ async function processAction(state, approved) {
     return sendPrompt({ ...state, phase: "action_completed" }, prompt);
   }
   if (await isStopped()) return;
-  // Persist this checkpoint before invoking an action. If Firefox crashes here,
-  // recovery will not blindly replay an operation with an unknown outcome.
   await writeTaskState({ ...state, phase: "executing" });
   let result;
   try { result = await executeAction(state.action); }
@@ -362,6 +360,13 @@ async function resumeTask(taskId) {
     } catch (_) {}
   } else if (state.phase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "The browser stopped during an action. Its outcome is unknown; it was not replayed." });
+  } else if (state.phase === "paused" && !state.resumePhase) {
+    // Legacy or incomplete checkpoint: do not replay a prompt or action whose outcome cannot be established.
+    await writeTaskState({
+      ...state,
+      phase: "interrupted",
+      error: "This saved task had no recovery checkpoint. AgentOS did not resend the prompt or replay an action. Review the AI conversation and workspace before starting a new task."
+    });
   } else {
     throw new Error("This task checkpoint cannot be resumed safely. Start a new task after reviewing it.");
   }
