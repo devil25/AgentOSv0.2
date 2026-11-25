@@ -33,6 +33,25 @@ function logState(state) {
 async function native(payload) {
   return api.runtime.sendMessage({ type: "AGENTOS_NATIVE_REQUEST", payload });
 }
+async function saveTaskState(patch) {
+  restoredTaskState = { ...(restoredTaskState || {}), ...patch, updatedAt: new Date().toISOString() };
+  await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_SET", state: restoredTaskState });
+}
+async function loadTaskState() {
+  const result = await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_GET" });
+  restoredTaskState = result?.state || null;
+  const state = restoredTaskState;
+  if (!state || ["completed", "cancelled"].includes(state.phase)) return;
+  activeTask = state.task || "";
+  executionSteps = Number(state.steps || 0);
+  if (activeTask) $("taskInput").value = activeTask;
+  if (["awaiting_model", "response_ready", "awaiting_approval", "action_completed"].includes(state.phase)) {
+    $("resumeTaskBtn").hidden = false;
+    out({ status: "recoverable_task", phase: state.phase, steps: executionSteps, note: "Resume continues from the last saved checkpoint; completed actions are not repeated." });
+  } else {
+    out({ status: "interrupted_task", phase: state.phase, steps: executionSteps, note: "An operation may have been interrupted. Review it before starting again; it will not be replayed automatically." });
+  }
+}
 function setRuntime(ok, message) {
   $("runtimeText").textContent = message;
   $("runtimeBadge").textContent = ok ? "CONNECTED" : "OFFLINE";
@@ -148,6 +167,7 @@ async function waitForNewResponse(baseline) {
 }
 async function submitToModel(prompt) {
   const baseline = await readMessages();
+  await saveTaskState({ phase: "awaiting_model", task: activeTask, prompt, baseline, steps: executionSteps, autonomy: $("autonomySelect").value });
   const fill = await providerMessage("AGENTOS_PROVIDER_FILL", { prompt });
   if (!fill?.ok) throw new Error(fill?.error || "Could not fill the AI prompt.");
   const sent = await providerMessage("AGENTOS_PROVIDER_SUBMIT");
@@ -192,56 +212,78 @@ async function continuePrompt(result) {
 async function runAgentLoop(initialTask, restored = null) {
   if (agentRunning) return;
   agentRunning = true;
-  activeTask = initialTask;
-  executionSteps = 0;
-  lastExecutionResult = null;
+  activeTask = initialTask || restored?.task || activeTask;
+  executionSteps = restored ? Number(restored.steps || 0) : 0;
+  lastExecutionResult = restored?.lastResult || null;
   $("sendTaskBtn").disabled = true;
   try {
     const info = await providerMessage("AGENTOS_PROVIDER_INSPECT");
     if (!info?.ok || !info.composerAvailable) throw new Error(info?.error || "Open a supported AI website and make sure its message box is available.");
-    let prompt = AGENTOS_INSTRUCTIONS + "\n\nUSER TASK:\n" + initialTask;
+    let prompt = restored?.prompt || (AGENTOS_INSTRUCTIONS + "\n\nUSER TASK:\n" + activeTask);
+    let recoveredResponse = ["response_ready", "awaiting_approval"].includes(restored?.phase) ? restored.response : null;
+    let recoveredBaseline = restored?.phase === "awaiting_model" ? restored.baseline : null;
+    $("resumeTaskBtn").hidden = true;
+    await saveTaskState({ phase: recoveredResponse ? "response_ready" : (recoveredBaseline ? "awaiting_model" : "running"), task: activeTask, prompt, steps: executionSteps });
     while (!stopped && executionSteps < MAX_STEPS) {
       logState(executionSteps ? "waiting for next model response" : "sending task");
-      const response = await submitToModel(prompt);
+      const response = recoveredResponse || (recoveredBaseline ? await waitForNewResponse(recoveredBaseline) : await submitToModel(prompt));
+      recoveredResponse = null;
+      recoveredBaseline = null;
+      await saveTaskState({ phase: "response_ready", task: activeTask, response, prompt, steps: executionSteps });
       out({ step: executionSteps, modelResponse: response });
       const action = extractAction(response);
       if (!action) {
         logState("task completed");
         out({ status: "completed", steps: executionSteps, finalResponse: response });
+        await saveTaskState({ phase: "completed", task: activeTask, steps: executionSteps, finalResponse: response });
         return;
       }
       const issue = validateAction(action);
       if (issue) throw new Error("Model proposed an invalid action: " + issue);
-      await saveTaskState({ phase: "awaiting_approval", task: activeTask, response, prompt, steps: executionSteps, action });\n      const approved = await authorizeAction(action);
+      await saveTaskState({ phase: "awaiting_approval", task: activeTask, response, prompt, steps: executionSteps, action });
+      const approved = await authorizeAction(action);
       if (!approved) {
-        const rejected = { ok: false, rejected: true, action: action.action, reason: "User rejected this action." };
-        prompt = await continuePrompt(rejected);
+        prompt = await continuePrompt({ ok: false, rejected: true, action: action.action, reason: "User rejected this action." });
+        await saveTaskState({ phase: "action_completed", task: activeTask, prompt, steps: executionSteps });
         continue;
       }
+      await saveTaskState({ phase: "executing", task: activeTask, response, steps: executionSteps, action });
       logState("executing " + action.action);
       const result = await executeAction(action);
       executionSteps += 1;
       lastExecutionResult = { action: action.action, arguments: action.arguments, result };
       out({ step: executionSteps, action: action.action, result });
       prompt = await continuePrompt(lastExecutionResult);
-      if (stopped) break;
+      await saveTaskState({ phase: "action_completed", task: activeTask, prompt, steps: executionSteps, lastResult: lastExecutionResult });
     }
-    if (executionSteps >= MAX_STEPS) logState("step limit reached");
-    else logState("stopped");
+    if (executionSteps >= MAX_STEPS) {
+      logState("step limit reached");
+      await saveTaskState({ phase: "step_limit", task: activeTask, steps: executionSteps });
+    } else {
+      logState("stopped");
+      await saveTaskState({ phase: "paused", task: activeTask, steps: executionSteps, prompt });
+    }
   } catch (error) {
     out({ ok: false, error: String(error.message || error), steps: executionSteps });
     logState("error");
+    await saveTaskState({ phase: "error", task: activeTask, steps: executionSteps, error: String(error.message || error) });
   } finally {
     clearApproval();
     agentRunning = false;
     $("sendTaskBtn").disabled = false;
   }
 }
-async function resumeTask() {\n  if (agentRunning || !restoredTaskState) return;\n  if (stopped) { out("AgentOS is stopped. Resume it first."); return; }\n  await runAgentLoop(restoredTaskState.task, restoredTaskState);\n}\nasync function sendTask() {
+async function resumeTask() {
+  if (agentRunning || !restoredTaskState) return;
+  if (stopped) { out("AgentOS is stopped. Resume it first."); return; }
+  await runAgentLoop(restoredTaskState.task, restoredTaskState);
+}
+async function sendTask() {
   const task = $("taskInput").value.trim();
   if (!task) { out("Write a task first."); return; }
   if (stopped) { out("AgentOS is stopped. Resume it first."); return; }
-  await saveTaskState({ phase: "starting", task, steps: 0, autonomy: $("autonomySelect").value });\n  await runAgentLoop(task);
+  await saveTaskState({ phase: "starting", task, steps: 0, autonomy: $("autonomySelect").value });
+  await runAgentLoop(task);
 }
 async function capture() {
   const result = await api.runtime.sendMessage({ type: "AGENTOS_PAGE_INFO" });
@@ -275,7 +317,8 @@ async function refreshStopState() {
 }
 $("connectBtn").addEventListener("click", testRuntime);
 $("providerCheckBtn").addEventListener("click", providerCheck);
-$("sendTaskBtn").addEventListener("click", sendTask);\n$("resumeTaskBtn").addEventListener("click", resumeTask);
+$("sendTaskBtn").addEventListener("click", sendTask);
+$("resumeTaskBtn").addEventListener("click", resumeTask);\n$("resumeTaskBtn").addEventListener("click", resumeTask);
 $("readResponseBtn").addEventListener("click", async () => {
   try { out((await readMessages()).join("\n\n")); } catch (error) { out(String(error)); }
 });
@@ -319,3 +362,4 @@ document.querySelectorAll(".tab").forEach(button => button.addEventListener("cli
 testRuntime();
 providerCheck();
 refreshStopState();
+loadTaskState();
