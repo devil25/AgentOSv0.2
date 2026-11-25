@@ -95,8 +95,18 @@
     return result;
   }
 
+  function hasChatGPTContinuationMarker() {
+    if (provider?.id !== "chatgpt") return false;
+    const lines = (document.body?.innerText || "")
+      .split("\n")
+      .map(line => line.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    return lines.some(line => /^continued from\b/i.test(line));
+  }
+
   function readAssistantResponse() {
     const composer = findComposer();
+    const continuationMarker = hasChatGPTContinuationMarker();
     const semanticSelectors = [
       '[data-message-author-role="assistant"]',
       '[data-role="assistant"]',
@@ -133,7 +143,8 @@
         messages: semantic.slice(-12).map(x => x.text),
         strategy: "semantic selectors",
         candidates: semantic.length,
-        url: location.href
+        url: location.href,
+        continuationMarker
       };
     }
 
@@ -167,7 +178,8 @@
         messages: blocks.slice(-16).map(x => x.text),
         strategy: "conversation text-block fallback",
         candidates: blocks.length,
-        url: location.href
+        url: location.href,
+        continuationMarker
       };
     }
 
@@ -177,7 +189,8 @@
       messages: rootText.length >= 24 ? [rootText.slice(-30000)] : [],
       strategy: "conversation root fallback",
       candidates: rootText.length ? 1 : 0,
-      url: location.href
+      url: location.href,
+      continuationMarker
     };
   }
 
@@ -272,7 +285,8 @@
       composerAvailable: Boolean(composer),
       assistantMessages: response.messages,
       readStrategy: response.strategy,
-      messageCandidates: response.candidates
+      messageCandidates: response.candidates,
+      continuationMarker: response.continuationMarker
     };
   }
 
@@ -336,7 +350,8 @@
           messages: snapshot.messages,
           url: snapshot.url || location.href,
           provider: provider?.id || "unknown",
-          strategy: snapshot.strategy
+          strategy: snapshot.strategy,
+          continuationMarker: snapshot.continuationMarker
         });
         // Only consume this snapshot after the background confirms acceptance.
         if (acknowledgement?.accepted) {
