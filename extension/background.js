@@ -220,7 +220,8 @@ async function startTask(message) {
   await setStopped(false);
   const state = {
     task: message.task, autonomy: message.autonomy === "autonomous" ? "autonomous" : "supervised",
-    tabId: tab.id, steps: 0, phase: "starting", startedAt: new Date().toISOString()
+    tabId: tab.id, provider: info.provider, providerUrl: info.url,
+    steps: 0, phase: "starting", startedAt: new Date().toISOString()
   };
   const prompt = message.prompt;
   await writeTaskState(state);
@@ -232,6 +233,18 @@ async function reattachTaskTab(state) {
   if (!tab?.id) throw new Error("Reopen the original AI conversation in a tab, then resume the task.");
   const info = await tabRequest(tab.id, "AGENTOS_PROVIDER_INSPECT");
   if (!info?.ok || !info.composerAvailable) throw new Error("The active tab is not a supported AI conversation. Reopen the task's AI website first.");
+  if (state.provider && info.provider !== state.provider) throw new Error("Open the same AI provider used by this task before resuming.");
+  if (state.providerUrl && info.url) {
+    try {
+      const previous = new URL(state.providerUrl);
+      const current = new URL(info.url);
+      if (previous.origin !== current.origin || previous.pathname !== current.pathname) {
+        throw new Error("Open the original AI conversation URL before resuming this task.");
+      }
+    } catch (error) {
+      if (error.message === "Open the original AI conversation URL before resuming this task.") throw error;
+    }
+  }
   return { ...state, tabId: tab.id };
 }
 async function resumeTask() {
