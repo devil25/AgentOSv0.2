@@ -148,15 +148,46 @@ async function tabRequest(tabId, type, extra = {}) {
 async function readProviderMessages(tabId) {
   const result = await tabRequest(tabId, "AGENTOS_PROVIDER_READ");
   if (!result?.ok) throw new Error(result?.error || "Could not read the AI website response.");
+  const messages = (result.messages || []).filter(x => typeof x === "string" && x.trim());
+  const messageIds = Array.isArray(result.messageIds) && result.messageIds.length === messages.length
+    ? result.messageIds.map(id => typeof id === "string" ? id : "")
+    : [];
   return {
-    messages: (result.messages || []).filter(x => typeof x === "string" && x.trim()),
+    messages,
+    messageIds,
     url: result.url || null,
     strategy: result.strategy || null,
     continuationMarker: result.continuationMarker === true
   };
 }
-function responseDelta(messages, baseline) {
+function responseDelta(messages, baseline, messageIds = [], baselineMessageIds = []) {
   if (!Array.isArray(messages) || !Array.isArray(baseline)) return "";
+
+  // Prefer stable message identity when the provider exposes it. This catches a
+  // new turn even when the conversation's visible message count stays constant
+  // (for example, when the UI virtualizes older turns).
+  const identitiesAreAligned =
+    Array.isArray(messageIds) &&
+    Array.isArray(baselineMessageIds) &&
+    messageIds.length === messages.length &&
+    baselineMessageIds.length === baseline.length &&
+    messageIds.every(id => typeof id === "string" && id.trim()) &&
+    baselineMessageIds.every(id => typeof id === "string" && id.trim());
+  if (identitiesAreAligned) {
+    const previousIds = new Set(baselineMessageIds);
+    const newIndexes = messageIds
+      .map((id, index) => previousIds.has(id) ? -1 : index)
+      .filter(index => index >= 0);
+    if (newIndexes.length) {
+      return newIndexes
+        .map(index => String(messages[index] || "").trim())
+        .filter(Boolean)
+        .join("\n\n")
+        .trim();
+    }
+  }
+
+  // Backward-compatible text delta for providers and saved tasks without IDs.
   if (messages.length > baseline.length) return messages.slice(baseline.length).join("\n\n").trim();
   if (messages.length && messages[messages.length - 1] !== baseline[baseline.length - 1]) {
     return String(messages[messages.length - 1]).trim();
@@ -194,6 +225,7 @@ async function sendPrompt(state, prompt) {
   const baseline = snapshot.messages;
   const submitting = await writeTaskState({
     ...state, phase: "submitting_prompt", prompt, baseline,
+    baselineMessageIds: snapshot.messageIds || [],
     providerUrl: snapshot.url || state.providerUrl,
     response: null, action: null, error: null
   });
@@ -350,7 +382,7 @@ async function processModelResponse(state, response) {
   await processAction(awaiting, true);
 }
 let responseProcessingTaskId = null;
-async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, continuationMarker = false) {
+async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, continuationMarker = false, messageIds = []) {
   let state = await readTaskState();
   // A timed-out task may still have a valid assistant response in the continued
   // ChatGPT conversation. Re-arm only this exact no-action/no-response timeout
@@ -403,7 +435,12 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
   if (state.provider === "chatgpt" && strategy !== "semantic selectors") {
     return { ok: true, accepted: true, reason: "unsafe-chatgpt-snapshot-strategy" };
   }
-  const response = responseDelta(messages, state.baseline || []);
+  const response = responseDelta(
+    messages,
+    state.baseline || [],
+    messageIds,
+    state.baselineMessageIds || []
+  );
   if (!response) {
     return { ok: true, accepted: true, reason: "no-new-response" };
   }
@@ -481,7 +518,7 @@ async function resumeTask(taskId) {
     try {
       await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
       const snapshot = await readProviderMessages(resumed.tabId);
-      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url, snapshot.strategy, snapshot.continuationMarker);
+      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url, snapshot.strategy, snapshot.continuationMarker, snapshot.messageIds);
     } catch (_) {}
   } else if (state.phase === "paused" && state.resumePhase === "awaiting_approval") {
     const attached = await reattachTaskTab(state);
@@ -572,7 +609,7 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_PROVIDER_FILL") return providerRequest("AGENTOS_PROVIDER_FILL", { prompt: message.prompt });
   if (message?.type === "AGENTOS_PROVIDER_SUBMIT") return providerRequest("AGENTOS_PROVIDER_SUBMIT");
   if (message?.type === "AGENTOS_PROVIDER_SNAPSHOT" && sender.tab?.id) {
-    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url, message.strategy, message.continuationMarker === true).catch(async error => {
+    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url, message.strategy, message.continuationMarker === true, message.messageIds || []).catch(async error => {
       const state = await readTaskState();
       if (state && state.tabId === sender.tab.id && state.phase === "awaiting_model") {
         await writeTaskState({ ...state, phase: "error", error: String(error.message || error) });
@@ -597,11 +634,12 @@ api.alarms.onAlarm.addListener(async alarm => {
     if (first.strategy === "semantic selectors" && first.messages.length) {
       await new Promise(resolve => setTimeout(resolve, 1500));
       const second = await readProviderMessages(state.tabId);
-      if (second.strategy === "semantic selectors" &&
-          JSON.stringify(first.messages) === JSON.stringify(second.messages)) {
+      const firstSignature = JSON.stringify({ ids: first.messageIds, messages: first.messages });
+      const secondSignature = JSON.stringify({ ids: second.messageIds, messages: second.messages });
+      if (second.strategy === "semantic selectors" && firstSignature === secondSignature) {
         await handleAssistantSnapshot(
           state.tabId, second.messages, second.url, second.strategy,
-          second.continuationMarker
+          second.continuationMarker, second.messageIds
         );
       }
     }
