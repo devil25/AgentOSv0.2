@@ -204,6 +204,10 @@ async function handleAssistantSnapshot(tabId, messages) {
   await processAction(awaiting, true);
 }
 async function startTask(message) {
+  const existing = await readTaskState();
+  if (existing && !["completed", "cancelled", "error", "interrupted", "step_limit"].includes(existing.phase)) {
+    throw new Error("A task is already active or paused. Resume or review it before starting another task.");
+  }
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("Open a supported AI website tab first.");
   const info = await tabRequest(tab.id, "AGENTOS_PROVIDER_INSPECT");
@@ -291,7 +295,15 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_PROVIDER_READ") return providerRequest("AGENTOS_PROVIDER_READ");
   if (message?.type === "AGENTOS_PROVIDER_FILL") return providerRequest("AGENTOS_PROVIDER_FILL", { prompt: message.prompt });
   if (message?.type === "AGENTOS_PROVIDER_SUBMIT") return providerRequest("AGENTOS_PROVIDER_SUBMIT");
-  if (message?.type === "AGENTOS_PROVIDER_SNAPSHOT" && sender.tab?.id) return handleAssistantSnapshot(sender.tab.id, message.messages);
+  if (message?.type === "AGENTOS_PROVIDER_SNAPSHOT" && sender.tab?.id) {
+    return handleAssistantSnapshot(sender.tab.id, message.messages).catch(async error => {
+      const state = await readTaskState();
+      if (state && state.tabId === sender.tab.id && state.phase === "awaiting_model") {
+        await writeTaskState({ ...state, phase: "error", error: String(error.message || error) });
+      }
+      return { ok: false, error: String(error.message || error) };
+    });
+  }
 });
 
 api.alarms.onAlarm.addListener(async alarm => {
