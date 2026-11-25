@@ -222,7 +222,11 @@ async function resumeTask() {
   const state = await readTaskState();
   if (!state) throw new Error("There is no saved task.");
   await setStopped(false);
-  if (state.phase === "action_completed" && state.prompt) {
+  if (state.phase === "paused" && state.resumePhase === "awaiting_model") {
+    await writeTaskState({ ...state, phase: "awaiting_model", resumePhase: null });
+  } else if (state.phase === "paused" && state.resumePhase === "awaiting_approval") {
+    await writeTaskState({ ...state, phase: "awaiting_approval", resumePhase: null });
+  } else if (state.phase === "action_completed" && state.prompt) {
     await sendPrompt(state, state.prompt);
   } else if (state.phase === "paused" && state.prompt) {
     await sendPrompt(state, state.prompt);
@@ -275,7 +279,7 @@ api.runtime.onMessage.addListener((message, sender) => {
   });
   if (message?.type === "AGENTOS_TASK_STOP") return setStopped(true).then(async () => {
     const state = await readTaskState();
-    if (state && ["awaiting_model", "awaiting_approval", "action_completed"].includes(state.phase)) await writeTaskState({ ...state, phase: "paused" });
+    if (state && ["awaiting_model", "awaiting_approval", "action_completed"].includes(state.phase)) await writeTaskState({ ...state, phase: "paused", resumePhase: state.phase });
     return { ok: true, stopped: true };
   });
   if (message?.type === "AGENTOS_SET_STOP") return setStopped(message.value).then(stopped => ({ ok: true, stopped }));
