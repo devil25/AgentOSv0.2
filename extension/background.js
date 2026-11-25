@@ -4,7 +4,7 @@ const TASKS_KEY = "agentos.tasks";
 const ACTIVE_TASK_KEY = "agentos.activeTaskId";
 const STOP_KEY = "agentos.stopped";
 const MAX_STEPS = 40;
-const RESPONSE_TIMEOUT_MINUTES = 4;
+const RESPONSE_TIMEOUT_MINUTES = 8;
 const AUTONOMOUS_ACTIONS = new Set([
   "runtime.status", "skills.list", "skills.read", "workspace.list",
   "workspace.read_file", "workspace.create_file", "terminal.execute"

@@ -273,7 +273,7 @@
         button.innerText, button.getAttribute("aria-label"),
         button.getAttribute("data-testid"), button.title
       ].join(" ").toLowerCase();
-      return /stop generating|stop response|cancel response|\\bstop\\b|إيقاف التوليد/.test(label);
+      return /stop generating|stop response|cancel response|\bstop\b|إيقاف التوليد/.test(label);
     });
   }
   function queueAssistantSnapshot() {
@@ -317,6 +317,10 @@
   };
   if (document.body) beginObserving();
   else document.addEventListener("DOMContentLoaded", beginObserving, { once: true });
+
+  // Polling fallback catches provider updates when the page reuses existing
+  // message nodes and a DOM mutation is not observed.
+  setInterval(queueAssistantSnapshot, 3000);
 
   globalThis.AgentOSProvider = {
     inspect, fillPrompt, submitPrompt, readAssistantMessages, readAssistantResponse
