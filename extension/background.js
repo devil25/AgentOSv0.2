@@ -262,7 +262,10 @@ async function resumeTask() {
   } else if (state.phase === "awaiting_approval") {
     try { await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_UPDATED", state }); } catch (_) {}
   } else if (state.phase === "awaiting_model") {
-    // The page observer will deliver the response when the model finishes.
+    try {
+      await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
+      await handleAssistantSnapshot(state.tabId, await readProviderMessages(state.tabId));
+    } catch (_) {}
   } else if (state.phase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "The browser stopped during an action. Its outcome is unknown; it was not replayed." });
   } else {
