@@ -61,3 +61,13 @@ test("rejects malformed or incomplete objects", () => {
   assert.equal(extractAction('text{"protocol":"agentos.v1","type":"action"}'), null);
   assert.equal(extractAction('text{"protocol":"agentos.v1","type":"action"'), null);
 });
+
+test("extracts terminal execution actions", () => {
+  const terminal = {
+    protocol: "agentos.v1",
+    type: "action",
+    action: "terminal.execute",
+    arguments: { command: "python -m pytest" }
+  };
+  assert.deepEqual(extractAction(JSON.stringify(terminal)), terminal);
+});
