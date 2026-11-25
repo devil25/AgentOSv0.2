@@ -2,10 +2,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AgentOS action envelope",
   "type": "object",
-  "required": ["protocol", "type", "action", "arguments"],
+  "required": [
+    "protocol",
+    "type",
+    "action",
+    "arguments"
+  ],
   "properties": {
-    "protocol": { "const": "agentos.v1" },
-    "type": { "const": "action" },
+    "protocol": {
+      "const": "agentos.v1"
+    },
+    "type": {
+      "const": "action"
+    },
     "action": {
       "type": "string",
       "enum": [
@@ -20,10 +29,13 @@
         "plugins.call",
         "mcp.tools",
         "mcp.call",
-        "browser.open_url"
+        "browser.open_url",
+        "terminal.execute"
       ]
     },
-    "arguments": { "type": "object" }
+    "arguments": {
+      "type": "object"
+    }
   },
   "additionalProperties": false
 }
