@@ -73,6 +73,12 @@ async function setStopped(value) {
 }
 async function nativeRequest(payload) {
   const safeControlRequest = ["runtime.status", "workspace.get", "workspace.select_directory"].includes(payload?.type);
+  if (payload?.type === "workspace.select_directory") {
+    const currentTask = await readTaskState();
+    if (currentTask && !["completed", "cancelled", "error", "interrupted", "step_limit"].includes(currentTask.phase)) {
+      return { ok: false, error: "Finish or safely stop the current task before changing the workspace folder. This prevents a running task from switching directories mid-execution." };
+    }
+  }
   if (await isStopped() && !safeControlRequest) {
     return { ok: false, error: "AgentOS is stopped. Resume it before running actions." };
   }
