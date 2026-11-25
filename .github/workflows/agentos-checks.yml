@@ -30,8 +30,14 @@ jobs:
         shell: pwsh
         run: |
           python -c "import json,pathlib; files=['extension/manifest.json','config/runtime.json','config/mcp_servers.example.json','protocol/action.schema.json','protocol/example-create-file.json']; [json.loads(pathlib.Path(p).read_text(encoding='utf-8')) for p in files]; print('JSON files are valid')"
-      - name: Check JavaScript syntax
-        shell: pwsh
+
+  javascript-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Check JavaScript syntax and provider adapter tests
         run: |
           node --check extension/background.js
           node --check extension/content.js
