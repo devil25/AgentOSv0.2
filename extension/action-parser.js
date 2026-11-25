@@ -4,7 +4,7 @@
   const SUPPORTED_ACTIONS = new Set([
     "runtime.status", "skills.list", "plugins.list", "mcp.list", "mcp.tools",
     "mcp.call", "skills.read", "plugins.call", "workspace.list",
-    "workspace.read_file", "workspace.create_file", "browser.open_url"
+    "workspace.read_file", "workspace.create_file", "browser.open_url", "terminal.execute"
   ]);
   const REQUIRED_KEYS = ["action", "arguments", "protocol", "type"];
 
