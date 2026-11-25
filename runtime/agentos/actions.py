@@ -57,7 +57,7 @@ def execute(action, args):
             "version": VERSION,
             "runtime": "online",
             "ai_source": "web",
-            "autonomy": "hybrid",
+            "autonomy": "configurable",
             "terminal_enabled": True,
         }
 
