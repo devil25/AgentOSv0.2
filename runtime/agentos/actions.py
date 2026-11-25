@@ -1,7 +1,8 @@
 import re
 import os
 import subprocess
-from .paths import safe_workspace_path, WORKSPACE, SKILLS
+from . import paths as agent_paths
+from .paths import safe_workspace_path, SKILLS
 from .catalog import list_skills, list_plugins, list_mcp
 from .audit import audit
 from .mcp_client import list_tools as mcp_list_tools, call_tool as mcp_call_tool
@@ -42,7 +43,7 @@ def _optional_path(args):
 def _workspace_relative(path):
     # Use POSIX separators in returned paths on every operating system.
     # Resolve both sides to avoid Windows short-name/case differences.
-    return path.resolve().relative_to(WORKSPACE.resolve()).as_posix()
+    return path.resolve().relative_to(agent_paths.WORKSPACE.resolve()).as_posix()
 
 def _validate_terminal_command(command):
     """Reject common host-level destructive/security operations.
@@ -77,6 +78,7 @@ def execute(action, args):
             "ai_source": "web",
             "autonomy": "configurable",
             "terminal_enabled": True,
+            "workspace": str(agent_paths.WORKSPACE.resolve()),
         }
 
     if action == "skills.list":
@@ -122,7 +124,7 @@ def execute(action, args):
 
     if action == "workspace.list":
         rel = _optional_path(args)
-        base = WORKSPACE if not rel else safe_workspace_path(rel)
+        base = agent_paths.WORKSPACE if not rel else safe_workspace_path(rel)
         if not base.exists():
             return {"ok": True, "items": []}
         if not base.is_dir():
@@ -160,7 +162,7 @@ def execute(action, args):
             argv = ["/bin/bash", "-lc", command]
         completed = subprocess.run(
             argv,
-            cwd=str(WORKSPACE.resolve()),
+            cwd=str(agent_paths.WORKSPACE.resolve()),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -173,7 +175,7 @@ def execute(action, args):
         return {
             "ok": completed.returncode == 0,
             "returncode": completed.returncode,
-            "cwd": str(WORKSPACE.resolve()),
+            "cwd": str(agent_paths.WORKSPACE.resolve()),
             "stdout": stdout,
             "stderr": stderr,
             "command": command,
@@ -199,6 +201,16 @@ def handle(payload):
         return {"ok": False, "error": "Unsupported protocol"}
 
     typ = payload.get("type")
+    if typ == "workspace.get":
+        return {"ok": True, "path": str(agent_paths.WORKSPACE.resolve())}
+    if typ == "workspace.select_directory":
+        from .workspace_picker import choose_directory
+        selected = choose_directory()
+        if not selected:
+            return {"ok": True, "cancelled": True, "path": str(agent_paths.WORKSPACE.resolve())}
+        workspace = agent_paths.set_workspace(selected)
+        audit("workspace.changed", {"path": str(workspace)})
+        return {"ok": True, "path": str(workspace)}
     if typ == "PING":
         return {"ok": True, "type": "PONG", "protocol": "agentos.v1"}
     if typ == "runtime.status":
