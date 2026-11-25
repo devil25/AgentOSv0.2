@@ -25,7 +25,7 @@
 
   function findComposer() {
     const selectors = [
-      'textarea',
+      "textarea",
       '[contenteditable="true"][role="textbox"]',
       '[contenteditable="true"]',
       '[role="textbox"]'
@@ -41,17 +41,127 @@
     return preferred || candidates.at(-1) || null;
   }
 
-  function readAssistantMessages() {
-    const selectors = [
+  function cleanText(el) {
+    if (!el) return "";
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll(
+      "button, input, textarea, select, [contenteditable='true'], nav, header, footer, aside, [aria-hidden='true']"
+    ).forEach(node => node.remove());
+    return (clone.innerText || clone.textContent || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function isInsideComposer(el, composer) {
+    return Boolean(composer && (el === composer || el.contains(composer) || composer.contains(el)));
+  }
+
+  function compactCandidates(nodes, composer) {
+    const rows = unique(nodes)
+      .filter(el => !isInsideComposer(el, composer))
+      .map(el => ({ el, text: cleanText(el) }))
+      .filter(x => x.text.length >= 12 && x.text.length <= 30000);
+
+    // Keep the most informative node when selectors match nested wrappers.
+    const result = [];
+    for (const row of rows) {
+      const existing = result.find(x => x.text === row.text);
+      if (existing) {
+        if (row.el.contains(existing.el)) Object.assign(existing, row);
+        continue;
+      }
+      const parent = result.find(x => x.el.contains(row.el));
+      if (parent && parent.text.length >= row.text.length) continue;
+      for (let i = result.length - 1; i >= 0; i--) {
+        if (row.el.contains(result[i].el)) result.splice(i, 1);
+      }
+      result.push(row);
+    }
+    return result;
+  }
+
+  function readAssistantResponse() {
+    const composer = findComposer();
+    const semanticSelectors = [
       '[data-message-author-role="assistant"]',
-      '[data-testid*="conversation-turn"] [data-message-author-role="assistant"]',
-      '[data-testid*="assistant"]',
-      '.markdown'
+      '[data-role="assistant"]',
+      '[data-author="assistant"]',
+      '[data-message-role="assistant"]',
+      '[aria-label*="assistant" i]',
+      '[data-testid*="assistant" i]',
+      '[class*="assistant-message" i]',
+      '[class*="message-assistant" i]',
+      '[class*="chat-message" i]',
+      '[class*="message-content" i]',
+      '[class*="markdown" i]',
+      '[class*="prose" i]',
+      '[class*="response-content" i]',
+      '[class*="answer-content" i]'
     ];
-    const nodes = unique(selectors.flatMap(s => [...document.querySelectorAll(s)]));
-    const texts = nodes.map(el => (el.innerText || "").trim())
-      .filter(Boolean).filter((value, i, all) => all.indexOf(value) === i);
-    return texts.slice(-12);
+
+    const semantic = compactCandidates(
+      semanticSelectors.flatMap(selector => {
+        try { return [...document.querySelectorAll(selector)]; }
+        catch (_) { return []; }
+      }),
+      composer
+    );
+
+    if (semantic.length) {
+      return {
+        ok: true,
+        messages: semantic.slice(-12).map(x => x.text),
+        strategy: "semantic selectors",
+        candidates: semantic.length
+      };
+    }
+
+    // Fallback for sites (including changing Z.ai layouts) that do not expose
+    // stable assistant attributes: inspect only the visible conversation region.
+    const roots = unique([
+      ...document.querySelectorAll('main, [role="main"], [class*="conversation" i], [class*="chat-content" i], [class*="chat-container" i]')
+    ]).filter(el => !isInsideComposer(el, composer));
+    const root = roots.sort((a, b) => cleanText(a).length - cleanText(b).length)[0] ||
+      document.body;
+
+    const blockSelectors = [
+      "p", "li", "pre", "blockquote", "h1", "h2", "h3",
+      '[role="paragraph"]',
+      '[class*="message" i]',
+      '[class*="markdown" i]',
+      '[class*="prose" i]',
+      "main > div > div"
+    ];
+    const blocks = compactCandidates(
+      blockSelectors.flatMap(selector => {
+        try { return [...root.querySelectorAll(selector)]; }
+        catch (_) { return []; }
+      }),
+      composer
+    ).filter(x => x.text.length >= 24);
+
+    if (blocks.length) {
+      return {
+        ok: true,
+        messages: blocks.slice(-16).map(x => x.text),
+        strategy: "conversation text-block fallback",
+        candidates: blocks.length
+      };
+    }
+
+    const rootText = cleanText(root);
+    return {
+      ok: true,
+      messages: rootText.length >= 24 ? [rootText.slice(-30000)] : [],
+      strategy: "conversation root fallback",
+      candidates: rootText.length ? 1 : 0
+    };
+  }
+
+  function readAssistantMessages() {
+    return readAssistantResponse().messages;
   }
 
   function setComposerText(el, value) {
@@ -89,6 +199,7 @@
 
   async function inspect() {
     const composer = findComposer();
+    const response = readAssistantResponse();
     return {
       ok: true,
       provider: provider?.id || "unknown",
@@ -96,7 +207,9 @@
       url: location.href,
       title: document.title,
       composerAvailable: Boolean(composer),
-      assistantMessages: readAssistantMessages()
+      assistantMessages: response.messages,
+      readStrategy: response.strategy,
+      messageCandidates: response.candidates
     };
   }
 
@@ -125,6 +238,6 @@
   }
 
   globalThis.AgentOSProvider = {
-    inspect, fillPrompt, submitPrompt, readAssistantMessages
+    inspect, fillPrompt, submitPrompt, readAssistantMessages, readAssistantResponse
   };
 })();
