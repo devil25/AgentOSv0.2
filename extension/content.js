@@ -13,6 +13,7 @@ api.runtime.onMessage.addListener((msg) => {
   const adapter = globalThis.AgentOSProvider;
   if (!adapter) return undefined;
   if (msg?.type === "AGENTOS_PROVIDER_INSPECT") return adapter.inspect();
+  if (msg?.type === "AGENTOS_PROVIDER_HANDOFF") return adapter.prepareContinuation();
   if (msg?.type === "AGENTOS_PROVIDER_FILL") return adapter.fillPrompt(msg.prompt);
   if (msg?.type === "AGENTOS_PROVIDER_SUBMIT") return adapter.submitPrompt();
   if (msg?.type === "AGENTOS_PROVIDER_READ") {
