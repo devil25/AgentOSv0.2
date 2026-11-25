@@ -1,6 +1,11 @@
 const api = globalThis.browser;
 const $ = (id) => document.getElementById(id);
 
+const AUTONOMOUS_ACTIONS = new Set([
+  "runtime.status", "skills.list", "skills.read", "workspace.list",
+  "workspace.read_file", "workspace.create_file", "terminal.execute"
+]);
+
 const SUPPORTED_ACTIONS = new Set([
   "runtime.status", "skills.list", "plugins.list", "mcp.list", "mcp.tools",
   "mcp.call", "skills.read", "plugins.call", "workspace.list",
@@ -170,8 +175,9 @@ async function executeAction(command) {
 }
 async function authorizeAction(command) {
   const mode = $("autonomySelect").value;
-  if (mode === "autonomous" && command.action !== "browser.open_url") return true;
-  if (mode === "autonomous" && command.action === "browser.open_url") return true;
+  if (mode === "autonomous" && AUTONOMOUS_ACTIONS.has(command.action)) return true;
+  // External integrations and browser navigation remain approval-gated even
+  // in Autonomous mode; the automatic scope is the local project workspace.
   return showApproval(command);
 }
 async function continuePrompt(result) {
