@@ -220,7 +220,7 @@
           candidates: entries.length,
           url: location.href,
           conversationId,
-continuationMarker
+          continuationMarker
         };
       }
     }
@@ -267,7 +267,7 @@ continuationMarker
         candidates: semantic.length,
         url: location.href,
         conversationId,
-continuationMarker
+          continuationMarker
       };
     }
 
@@ -303,7 +303,7 @@ continuationMarker
         candidates: blocks.length,
         url: location.href,
         conversationId,
-continuationMarker
+          continuationMarker
       };
     }
 
@@ -315,7 +315,7 @@ continuationMarker
       candidates: rootText.length ? 1 : 0,
       url: location.href,
       conversationId,
-continuationMarker
+          continuationMarker
     };
   }
 
