@@ -15,6 +15,16 @@ api.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "AGENTOS_GET_STOP") return Promise.resolve({stopped});
   if (msg?.type === "AGENTOS_OPEN_URL") return openSafeUrl(msg.url);
   if (msg?.type === "AGENTOS_PAGE_INFO") return getPageInfo();
+  if (msg?.type === "AGENTOS_PROVIDER_INSPECT") return providerRequest("AGENTOS_PROVIDER_INSPECT");
+  if (msg?.type === "AGENTOS_PROVIDER_READ") return providerRequest("AGENTOS_PROVIDER_READ");
+  if (msg?.type === "AGENTOS_PROVIDER_FILL") {
+    if (stopped) return {ok:false,error:"AgentOS is stopped"};
+    return providerRequest("AGENTOS_PROVIDER_FILL", {prompt:msg.prompt});
+  }
+  if (msg?.type === "AGENTOS_PROVIDER_SUBMIT") {
+    if (stopped) return {ok:false,error:"AgentOS is stopped"};
+    return providerRequest("AGENTOS_PROVIDER_SUBMIT");
+  }
 });
 
 async function nativeRequest(payload) {
@@ -38,6 +48,21 @@ async function nativeRequest(payload) {
   });
 }
 
+async function activeTab() {
+  const [tab] = await api.tabs.query({active:true,currentWindow:true});
+  if (!tab?.id) throw new Error("No active tab");
+  return tab;
+}
+
+async function providerRequest(type, extra={}) {
+  const tab = await activeTab();
+  try {
+    return await api.tabs.sendMessage(tab.id,{type,...extra});
+  } catch (e) {
+    return {ok:false,error:"Open Z.ai, ChatGPT, Claude, or Gemini in the active tab first."};
+  }
+}
+
 async function openSafeUrl(raw) {
   if (stopped) return {ok:false,error:"AgentOS is stopped. Resume it before opening a URL."};
   try {
@@ -49,8 +74,7 @@ async function openSafeUrl(raw) {
 }
 
 async function getPageInfo() {
-  const [tab] = await api.tabs.query({active:true,currentWindow:true});
-  if (!tab?.id) return {ok:false,error:"No active tab"};
+  const tab = await activeTab();
   try { return await api.tabs.sendMessage(tab.id,{type:"AGENTOS_READ_PAGE"}); }
   catch(e) { return {ok:false,error:"This page is not accessible to AgentOS. Open a supported AI website or a normal http/https page."}; }
 }
