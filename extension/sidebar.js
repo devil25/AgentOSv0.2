@@ -19,6 +19,7 @@ let executionSteps = 0;
 let lastExecutionResult = null;
 let pendingApproval = null;
 let agentRunning = false;
+let restoredTaskState = null;
 const MAX_STEPS = 40;
 const RESPONSE_TIMEOUT_MS = 180000;
 const POLL_INTERVAL_MS = 1200;
@@ -188,7 +189,7 @@ async function continuePrompt(result) {
     "Latest action result:", JSON.stringify(result, null, 2)
   ].join("\n\n");
 }
-async function runAgentLoop(initialTask) {
+async function runAgentLoop(initialTask, restored = null) {
   if (agentRunning) return;
   agentRunning = true;
   activeTask = initialTask;
@@ -211,7 +212,7 @@ async function runAgentLoop(initialTask) {
       }
       const issue = validateAction(action);
       if (issue) throw new Error("Model proposed an invalid action: " + issue);
-      const approved = await authorizeAction(action);
+      await saveTaskState({ phase: "awaiting_approval", task: activeTask, response, prompt, steps: executionSteps, action });\n      const approved = await authorizeAction(action);
       if (!approved) {
         const rejected = { ok: false, rejected: true, action: action.action, reason: "User rejected this action." };
         prompt = await continuePrompt(rejected);
@@ -236,11 +237,11 @@ async function runAgentLoop(initialTask) {
     $("sendTaskBtn").disabled = false;
   }
 }
-async function sendTask() {
+async function resumeTask() {\n  if (agentRunning || !restoredTaskState) return;\n  if (stopped) { out("AgentOS is stopped. Resume it first."); return; }\n  await runAgentLoop(restoredTaskState.task, restoredTaskState);\n}\nasync function sendTask() {
   const task = $("taskInput").value.trim();
   if (!task) { out("Write a task first."); return; }
   if (stopped) { out("AgentOS is stopped. Resume it first."); return; }
-  await runAgentLoop(task);
+  await saveTaskState({ phase: "starting", task, steps: 0, autonomy: $("autonomySelect").value });\n  await runAgentLoop(task);
 }
 async function capture() {
   const result = await api.runtime.sendMessage({ type: "AGENTOS_PAGE_INFO" });
@@ -274,7 +275,7 @@ async function refreshStopState() {
 }
 $("connectBtn").addEventListener("click", testRuntime);
 $("providerCheckBtn").addEventListener("click", providerCheck);
-$("sendTaskBtn").addEventListener("click", sendTask);
+$("sendTaskBtn").addEventListener("click", sendTask);\n$("resumeTaskBtn").addEventListener("click", resumeTask);
 $("readResponseBtn").addEventListener("click", async () => {
   try { out((await readMessages()).join("\n\n")); } catch (error) { out(String(error)); }
 });
