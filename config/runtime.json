@@ -3,18 +3,20 @@
   "workspace_only": true,
   "max_file_read_bytes": 1048576,
   "max_file_write_chars": 200000,
-  "max_tool_steps_per_task": 8,
-  "terminal_enabled": false,
-  "autonomous_mode": "hybrid",
+  "max_tool_steps_per_task": 40,
+  "terminal_enabled": true,
+  "autonomous_mode": "autonomous_or_supervised",
   "ai_source": "web",
   "default_provider": "zai",
   "require_confirmation_for": [
-    "workspace.create_file",
-    "mcp.call",
-    "plugins.call",
-    "browser.open_url",
-    "browser.submit_prompt"
+    "all_actions_in_supervised_mode",
+    "operations_outside_workspace",
+    "destructive_system_operations",
+    "external_data_transfer",
+    "credential_or_security_changes"
   ],
   "text_only_tasks": "answer_without_tools",
-  "file_creation": "only_when_explicitly_requested"
+  "file_creation": "only_when_explicitly_requested",
+  "execution_working_directory": "workspace",
+  "terminal_timeout_seconds": 120
 }
