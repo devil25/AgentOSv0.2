@@ -34,6 +34,19 @@ test("handles braces inside string values", () => {
   assert.deepEqual(extractAction("prefix " + JSON.stringify(withBraces)), withBraces);
 });
 
+test("chooses the latest action when response history contains older actions", () => {
+  const older = {
+    ...action,
+    arguments: { path: "old-request.txt", content: "old" }
+  };
+  const newer = {
+    ...action,
+    arguments: { path: "new-request.txt", content: "new" }
+  };
+  const history = JSON.stringify(older) + "\\nPrior task completed.\\n" + JSON.stringify(newer);
+  assert.deepEqual(extractAction(history), newer);
+});
+
 test("rejects unsupported actions", () => {
   const unsupported = { ...action, action: "terminal.execute" };
   assert.equal(extractAction(JSON.stringify(unsupported)), null);
