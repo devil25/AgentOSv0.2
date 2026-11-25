@@ -44,6 +44,24 @@ def _workspace_relative(path):
     # Resolve both sides to avoid Windows short-name/case differences.
     return path.resolve().relative_to(WORKSPACE.resolve()).as_posix()
 
+def _validate_terminal_command(command):
+    """Reject common host-level destructive/security operations.
+
+    This is a guardrail, not an OS sandbox: child processes still inherit the
+    Windows user's permissions and may access paths outside the workspace.
+    """
+    blocked = [
+        r"\b(?:format|diskpart|shutdown|restart-computer|stop-computer)\b",
+        r"\b(?:reg(?:\.exe)?\s+(?:add|delete|import)|bcdedit|cipher)\b",
+        r"\b(?:takeown|icacls|set-acl|set-executionpolicy)\b",
+        r"\b(?:net\s+user|netsh|sc\s+(?:delete|config|stop))\b",
+        r"\b(?:clear-disk|initialize-disk|remove-partition|remove-disk)\b",
+        r"\b(?:add-mppreference|set-mppreference)\b",
+    ]
+    for pattern in blocked:
+        if re.search(pattern, command, flags=re.IGNORECASE):
+            raise ValueError("Blocked host-level or destructive command. Use a supervised/manual operation outside the project workspace.")
+
 
 def execute(action, args):
     if not isinstance(action, str) or action not in SUPPORTED_ACTIONS:
