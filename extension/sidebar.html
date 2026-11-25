@@ -50,10 +50,8 @@
         <button id="captureBtn" class="btn secondary full">Capture page context</button>
       </div>
       <div class="card">
-        <div class="eyebrow">REVIEW AI ACTION</div>
-        <p class="muted hint">Only supported, valid JSON actions are loaded here. Review the complete action before running it.</p>
-        <textarea id="commandInput" spellcheck="false" placeholder='{"protocol":"agentos.v1","type":"action","action":"workspace.create_file","arguments":{"path":"notes/hello.txt","content":"Hello"}}'></textarea>
-        <button id="runBtn" class="btn primary full">Validate & run action</button>
+        <div class="eyebrow">ACTION APPROVAL</div>
+        <p class="muted hint">In Supervised mode, AgentOS pauses here and waits for your decision before every tool action.</p>
         <div id="approvalCard" class="approval-card" hidden>
           <div class="eyebrow">ACTION APPROVAL REQUIRED</div>
           <pre id="approvalDetails" class="output"></pre>
