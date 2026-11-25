@@ -60,6 +60,34 @@ function setRuntime(ok, message) {
   $("runtimeBadge").className = "badge " + (ok ? "good" : "bad");
   $("runtimeLed").classList.toggle("online", ok);
 }
+async function loadWorkspace() {
+  const result = await native({ type: "workspace.get" });
+  if (!result?.ok) {
+    $("workspacePath").textContent = result?.error || "Workspace unavailable";
+    return result;
+  }
+  $("workspacePath").textContent = result.path;
+  return result;
+}
+async function chooseWorkspace() {
+  $("chooseWorkspaceBtn").disabled = true;
+  $("chooseWorkspaceBtn").textContent = "Opening folder picker…";
+  try {
+    const result = await native({ type: "workspace.select_directory" });
+    if (!result?.ok) throw new Error(result?.error || "Could not select the workspace folder.");
+    if (result.cancelled) {
+      out("Folder selection cancelled. The current workspace was kept.");
+    } else {
+      $("workspacePath").textContent = result.path;
+      out({ ok: true, workspace: result.path, note: "New workspace saved. Future workspace and terminal actions will use this folder." });
+    }
+  } catch (error) {
+    out({ ok: false, error: String(error.message || error) });
+  } finally {
+    $("chooseWorkspaceBtn").disabled = false;
+    $("chooseWorkspaceBtn").textContent = "Choose folder";
+  }
+}
 async function testRuntime() {
   setRuntime(false, "Connecting…");
   const result = await native({ type: "runtime.status" });
@@ -82,7 +110,7 @@ async function sendTask() {
       type: "AGENTOS_TASK_START",
       task,
       autonomy: $("autonomySelect").value,
-      prompt: AGENTOS_INSTRUCTIONS + "\n\nUSER TASK:\n" + task
+      prompt: AGENTOS_INSTRUCTIONS + "\n\nAGENTOS WORKSPACE:\n" + (($("workspacePath").textContent || "").trim()) + "\nAll workspace tool paths are relative to this selected directory.\n\nUSER TASK:\n" + task
     });
     if (!result?.ok) throw new Error(result?.error || "Could not start the task.");
     renderTaskState(result.state);
@@ -146,6 +174,8 @@ async function refreshStopState() {
   const result = await api.runtime.sendMessage({ type: "AGENTOS_GET_STOP" });
   $("stopBtn").textContent = result?.stopped ? "Resume" : "Stop";
 }
+$("chooseWorkspaceBtn").addEventListener("click", chooseWorkspace);
+$("refreshWorkspaceBtn").addEventListener("click", loadWorkspace);
 $("connectBtn").addEventListener("click", testRuntime);
 $("providerCheckBtn").addEventListener("click", providerCheck);
 $("sendTaskBtn").addEventListener("click", sendTask);
@@ -178,6 +208,7 @@ document.querySelectorAll(".tab").forEach(button => button.addEventListener("cli
 api.runtime.onMessage.addListener(message => {
   if (message?.type === "AGENTOS_TASK_STATE_UPDATED") renderTaskState(message.state);
 });
+loadWorkspace();
 testRuntime();
 providerCheck();
 refreshStopState();
