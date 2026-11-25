@@ -141,6 +141,15 @@ async function sendPrompt(state, prompt) {
     await api.alarms.clear("agentos-response-timeout");
     await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
     const latest = await readProviderMessages(next.tabId);
+    if (latest.url) {
+      try {
+        const before = new URL(next.providerUrl), after = new URL(latest.url);
+        if (before.origin === after.origin && (before.pathname === "/" || before.pathname === after.pathname)) {
+          next.providerUrl = latest.url;
+          await writeTaskState(next);
+        }
+      } catch (_) {}
+    }
     await handleAssistantSnapshot(next.tabId, latest.messages, latest.url);
   } catch (_) {}
 }
