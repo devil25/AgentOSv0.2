@@ -32,7 +32,6 @@
     '[data-testid^="conversation-turn-"][data-turn="assistant"]',
     '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
     'section[data-turn="assistant"]',
-    '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
     '[data-chatgpt-search-unit-key$=":assistant"]',
     '[data-content-search-unit-key$=":assistant"]',
     '[data-markdown-text-style="assistant-message"]',
