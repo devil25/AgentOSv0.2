@@ -81,15 +81,17 @@ function responseDelta(messages, baseline) {
 async function sendPrompt(state, prompt) {
   if (await isStopped()) return;
   const baseline = await readProviderMessages(state.tabId);
-  const next = await writeTaskState({
-    ...state, phase: "awaiting_model", prompt, baseline,
+  const submitting = await writeTaskState({
+    ...state, phase: "submitting_prompt", prompt, baseline,
     response: null, action: null, error: null
   });
-  await tabRequest(next.tabId, "AGENTOS_PROVIDER_FILL", { prompt });
-  await tabRequest(next.tabId, "AGENTOS_PROVIDER_SUBMIT");
+  await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_FILL", { prompt });
+  await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_SUBMIT");
+  const next = await writeTaskState({ ...submitting, phase: "awaiting_model" });
   try {
     await api.alarms.clear("agentos-response-timeout");
     await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
+    await handleAssistantSnapshot(next.tabId, await readProviderMessages(next.tabId));
   } catch (_) {}
 }
 function validateAction(command) {
@@ -181,12 +183,7 @@ async function processAction(state, approved) {
   }
   if (!(await isStopped())) await sendPrompt(completed, prompt);
 }
-async function handleAssistantSnapshot(tabId, messages) {
-  const state = await readTaskState();
-  if (!state || state.phase !== "awaiting_model" || state.tabId !== tabId || await isStopped()) return;
-  const response = responseDelta(messages, state.baseline || []);
-  if (!response) return;
-  await api.alarms.clear("agentos-response-timeout");
+async function processModelResponse(state, response) {
   const ready = await writeTaskState({ ...state, phase: "response_ready", response });
   const action = globalThis.AgentOSActionParser?.extractAction(response) || null;
   if (!action) {
@@ -202,6 +199,14 @@ async function handleAssistantSnapshot(tabId, messages) {
   const awaiting = await writeTaskState({ ...ready, phase: approvalNeeded ? "awaiting_approval" : "executing", action });
   if (approvalNeeded) return;
   await processAction(awaiting, true);
+}
+async function handleAssistantSnapshot(tabId, messages) {
+  const state = await readTaskState();
+  if (!state || state.phase !== "awaiting_model" || state.tabId !== tabId || await isStopped()) return;
+  const response = responseDelta(messages, state.baseline || []);
+  if (!response) return;
+  await api.alarms.clear("agentos-response-timeout");
+  return processModelResponse(state, response);
 }
 async function startTask(message) {
   const existing = await readTaskState();
@@ -233,7 +238,9 @@ async function resumeTask() {
   const state = await readTaskState();
   if (!state) throw new Error("There is no saved task.");
   await setStopped(false);
-  if (state.phase === "paused" && state.resumePhase === "awaiting_model") {
+  if (state.phase === "response_ready" && state.response) {
+    await processModelResponse(state, state.response);
+  } else if (state.phase === "paused" && state.resumePhase === "awaiting_model") {
     const attached = await reattachTaskTab(state);
     const resumed = await writeTaskState({ ...attached, phase: "awaiting_model", resumePhase: null });
     try {
@@ -246,6 +253,8 @@ async function resumeTask() {
   } else if (state.phase === "paused" && state.resumePhase === "action_completed" && state.prompt) {
     const attached = await reattachTaskTab(state);
     await sendPrompt(attached, state.prompt);
+  } else if (state.phase === "submitting_prompt" || (state.phase === "paused" && state.resumePhase === "submitting_prompt")) {
+    await writeTaskState({ ...state, phase: "interrupted", error: "The browser stopped while sending a prompt. Whether it reached the model is unknown; it was not sent again." });
   } else if (state.phase === "paused" && state.resumePhase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "The tab or extension stopped during an action. Its outcome is unknown; it was not replayed." });
   } else if (state.phase === "action_completed" && state.prompt) {
@@ -338,6 +347,8 @@ async function recoverInterruptedAction() {
   const state = await readTaskState();
   if (state?.phase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "Firefox restarted during an action. Its outcome is unknown; it was not replayed." });
+  } else if (state?.phase === "submitting_prompt") {
+    await writeTaskState({ ...state, phase: "interrupted", error: "Firefox restarted while sending a prompt. Whether it reached the model is unknown; it was not sent again." });
   }
 }
 api.runtime.onStartup.addListener(recoverInterruptedAction);
