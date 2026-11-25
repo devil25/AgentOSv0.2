@@ -1,6 +1,7 @@
 import re
 import os
 import subprocess
+from pathlib import Path
 from . import paths as agent_paths
 from .paths import safe_workspace_path, SKILLS
 from .catalog import list_skills, list_plugins, list_mcp
@@ -44,25 +45,6 @@ def _workspace_relative(path):
     # Use POSIX separators in returned paths on every operating system.
     # Resolve both sides to avoid Windows short-name/case differences.
     return path.resolve().relative_to(agent_paths.WORKSPACE.resolve()).as_posix()
-
-def _validate_terminal_command(command):
-    """Reject common host-level destructive/security operations.
-
-    This is a guardrail, not an OS sandbox: child processes still inherit the
-    Windows user's permissions and may access paths outside the workspace.
-    """
-    blocked = [
-        r"\b(?:format|diskpart|shutdown|restart-computer|stop-computer)\b",
-        r"\b(?:reg(?:\.exe)?\s+(?:add|delete|import)|bcdedit|cipher)\b",
-        r"\b(?:takeown|icacls|set-acl|set-executionpolicy)\b",
-        r"\b(?:net\s+user|netsh|sc\s+(?:delete|config|stop))\b",
-        r"\b(?:clear-disk|initialize-disk|remove-partition|remove-disk)\b",
-        r"\b(?:add-mppreference|set-mppreference)\b",
-    ]
-    for pattern in blocked:
-        if re.search(pattern, command, flags=re.IGNORECASE):
-            raise ValueError("Blocked host-level or destructive command. Use a supervised/manual operation outside the project workspace.")
-
 
 def execute(action, args):
     if not isinstance(action, str) or action not in SUPPORTED_ACTIONS:
@@ -148,38 +130,70 @@ def execute(action, args):
         }
 
     if action == "terminal.execute":
-        command = _required_text(args, "command", 12000)
-        _validate_terminal_command(command)
+        command = _required_text(args, "command", 100000)
         timeout = args.get("timeout_seconds", 120)
-        if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 180:
-            raise ValueError("'timeout_seconds' must be an integer from 1 to 180")
-        # Commands run with the project workspace as their working directory.
-        # The process still inherits the Windows user's OS permissions; this is
-        # a working-directory boundary, not an operating-system sandbox.
+        if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 600:
+            raise ValueError("'timeout_seconds' must be an integer from 1 to 600")
+
+        requested_cwd = args.get("cwd")
+        if requested_cwd is None or requested_cwd == "":
+            working_directory = agent_paths.WORKSPACE.resolve()
+        else:
+            if not isinstance(requested_cwd, str) or not requested_cwd.strip() or len(requested_cwd) > 1024:
+                raise ValueError("'cwd' must be a non-empty directory path under 1024 characters")
+            requested_path = Path(requested_cwd).expanduser()
+            if not requested_path.is_absolute():
+                requested_path = agent_paths.WORKSPACE / requested_path
+            working_directory = requested_path.resolve()
+            if not working_directory.exists() or not working_directory.is_dir():
+                raise ValueError("'cwd' must point to an existing directory")
+
         if os.name == "nt":
             argv = ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command]
         else:
             argv = ["/bin/bash", "-lc", command]
-        completed = subprocess.run(
-            argv,
-            cwd=str(agent_paths.WORKSPACE.resolve()),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            shell=False,
-        )
+
+        try:
+            completed = subprocess.run(
+                argv,
+                cwd=str(working_directory),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                shell=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            def partial_text(value):
+                if value is None:
+                    return ""
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", "replace")[-60000:]
+                return str(value)[-60000:]
+
+            return {
+                "ok": False,
+                "timed_out": True,
+                "returncode": None,
+                "timeout_seconds": timeout,
+                "cwd": str(working_directory),
+                "stdout": partial_text(exc.stdout),
+                "stderr": partial_text(exc.stderr),
+                "command": command,
+                "execution_scope": "current operating-system user permissions; no workspace sandbox",
+            }
+
         stdout = completed.stdout[-60000:]
         stderr = completed.stderr[-60000:]
         return {
             "ok": completed.returncode == 0,
             "returncode": completed.returncode,
-            "cwd": str(agent_paths.WORKSPACE.resolve()),
+            "cwd": str(working_directory),
             "stdout": stdout,
             "stderr": stderr,
             "command": command,
-            "execution_scope": "workspace working directory; not an OS sandbox",
+            "execution_scope": "current operating-system user permissions; no workspace sandbox",
         }
 
     if action == "workspace.create_file":
