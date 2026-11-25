@@ -48,7 +48,7 @@ test("chooses the latest action when response history contains older actions", (
 });
 
 test("rejects unsupported actions", () => {
-  const unsupported = { ...action, action: "terminal.execute" };
+  const unsupported = { ...action, action: "terminal.unsafe" };
   assert.equal(extractAction(JSON.stringify(unsupported)), null);
 });
 
