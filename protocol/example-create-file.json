@@ -1,0 +1,6 @@
+{
+  "protocol":"agentos.v1",
+  "type":"action",
+  "action":"workspace.create_file",
+  "arguments":{"path":"notes/hello.txt","content":"Hello from AgentOS"}
+}

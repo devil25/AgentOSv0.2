@@ -1,0 +1,11 @@
+{
+  "id":"example-hello",
+  "name":"Example Hello Plugin",
+  "version":"0.1.0",
+  "description":"A manifest-only example plugin showing the AgentOS plugin format.",
+  "entrypoint":"plugin.py",
+  "enabled":false,
+  "trusted":false,
+  "permissions":["none"],
+  "tools":[{"name":"hello","description":"Return a greeting"}]
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentOS</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><div class="mark">A</div><div><b>AgentOS</b><small>Browser Agent · v0.1.0</small></div></div>
+    <span id="runtimeLed" class="led"></span>
+  </header>
+  <nav class="tabs">
+    <button class="tab active" data-tab="agent">Agent</button>
+    <button class="tab" data-tab="skills">Skills</button>
+    <button class="tab" data-tab="plugins">Plugins</button>
+    <button class="tab" data-tab="mcp">MCP</button>
+  </nav>
+  <main>
+    <section id="panel-agent" class="panel active">
+      <div class="card status-card">
+        <div class="eyebrow">LOCAL RUNTIME</div>
+        <div class="statusline"><span id="runtimeText">Checking connection…</span><span id="runtimeBadge" class="badge warn">UNKNOWN</span></div>
+        <div class="row"><button id="connectBtn" class="btn primary">Test Windows connection</button><button id="stopBtn" class="btn danger">Stop</button></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow">CURRENT PAGE</div>
+        <div id="pageTitle" class="page-title">No page captured</div>
+        <div id="pageUrl" class="muted break">Open a page and capture its visible text.</div>
+        <button id="captureBtn" class="btn secondary full">Capture page context</button>
+      </div>
+      <div class="card">
+        <div class="eyebrow">AGENTOS ACTION</div>
+        <p class="muted hint">Paste a JSON action returned by your AI website. Only supported, validated actions are executed.</p>
+        <textarea id="commandInput" spellcheck="false" placeholder='{"protocol":"agentos.v1","type":"action","action":"workspace.create_file","arguments":{"path":"notes/hello.txt","content":"Hello"}}'></textarea>
+        <button id="runBtn" class="btn primary full">Validate & run action</button>
+      </div>
+      <div class="card">
+        <div class="eyebrow">RESULT / LOG</div>
+        <pre id="output" class="output">AgentOS ready. Connect the Windows runtime to begin.</pre>
+      </div>
+    </section>
+    <section id="panel-skills" class="panel">
+      <div class="card"><div class="eyebrow">AGENT SKILLS</div><p class="muted">Compatible with the open SKILL.md format. Import from GitHub using the included CLI, then refresh.</p><button id="skillsRefresh" class="btn secondary full">Refresh installed skills</button><div id="skillsList" class="list"></div></div>
+      <div class="card"><div class="eyebrow">INSTALL FROM GITHUB</div><p class="muted">Use PowerShell: <code>python D:\AgentOS\runtime\agentos_cli.py skills install-github OWNER/REPO</code></p></div>
+    </section>
+    <section id="panel-plugins" class="panel">
+      <div class="card"><div class="eyebrow">PLUGIN MANAGER</div><p class="muted">Plugins are discovered from the local plugins directory. External plugin code is not auto-executed.</p><button id="pluginsRefresh" class="btn secondary full">Refresh plugins</button><div id="pluginsList" class="list"></div></div>
+      <div class="card"><div class="eyebrow">PLUGIN DEVELOPMENT</div><p class="muted">Add a folder containing plugin.json. Review its code and permissions before enabling it.</p></div>
+    </section>
+    <section id="panel-mcp" class="panel">
+      <div class="card"><div class="eyebrow">MODEL CONTEXT PROTOCOL</div><p class="muted">Local stdio MCP servers configured in config/mcp_servers.json. Only tools explicitly listed in allowed_tools may be called.</p><button id="mcpRefresh" class="btn secondary full">Refresh MCP servers</button><div id="mcpList" class="list"></div></div>
+      <div class="card"><div class="eyebrow">CONFIGURATION</div><p class="muted">Edit <code>D:\AgentOS\config\mcp_servers.json</code> and restart the host. MCP servers run with your Windows user permissions.</p></div>
+    </section>
+  </main>
+  <footer><span>LOCAL-FIRST</span><span id="taskState">IDLE</span></footer>
+  <script src="sidebar.js"></script>
+</body>
+</html>

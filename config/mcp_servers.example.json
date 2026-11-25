@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "example-filesystem": {
+      "description": "Example placeholder; replace with a reviewed MCP server.",
+      "enabled": false,
+      "command": "python",
+      "args": ["-m", "your_reviewed_mcp_server"],
+      "allowed_tools": []
+    }
+  }
+}

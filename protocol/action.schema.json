@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "title":"AgentOS action envelope",
+  "type":"object",
+  "required":["protocol","type","action","arguments"],
+  "properties":{
+    "protocol":{"const":"agentos.v1"},
+    "type":{"const":"action"},
+    "action":{"type":"string","enum":["runtime.status","skills.list","plugins.list","mcp.list","workspace.list","workspace.read_file","workspace.create_file","skills.read","plugins.call","mcp.tools","mcp.call","browser.open_url"]},
+    "arguments":{"type":"object"}
+  },
+  "additionalProperties":false
+}

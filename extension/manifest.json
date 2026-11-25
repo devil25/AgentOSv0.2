@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "AgentOS Browser",
+  "version": "0.1.0",
+  "description": "A local-first AI agent bridge for Firefox and Windows.",
+  "permissions": ["tabs", "storage", "nativeMessaging", "activeTab"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*"
+  ],
+  "background": {"scripts": ["background.js"]},
+  "action": {"default_title": "Open AgentOS"},
+  "sidebar_action": {
+    "default_title": "AgentOS",
+    "default_panel": "sidebar.html",
+    "open_at_install": false
+  },
+  "content_scripts": [{
+    "matches": [
+      "https://chatgpt.com/*",
+      "https://chat.openai.com/*",
+      "https://claude.ai/*",
+      "https://gemini.google.com/*"
+    ],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "agentos@example.local",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {"required": ["none"]}
+    }
+  }
+}

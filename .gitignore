@@ -1,0 +1,22 @@
+@"
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+config/mcp_servers.json
+runtime/com.agentos.host.json
+"@ | Set-Content -Encoding UTF8 .gitignore
+# Local logs and backups
+logs/
+*.bak
+New Text Document.txt
