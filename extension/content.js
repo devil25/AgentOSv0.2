@@ -16,7 +16,7 @@ api.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "AGENTOS_PROVIDER_FILL") return adapter.fillPrompt(msg.prompt);
   if (msg?.type === "AGENTOS_PROVIDER_SUBMIT") return adapter.submitPrompt();
   if (msg?.type === "AGENTOS_PROVIDER_READ") {
-    return Promise.resolve({ok:true, messages:adapter.readAssistantMessages()});
+    return Promise.resolve(adapter.readAssistantResponse ? adapter.readAssistantResponse() : {ok:true, messages:adapter.readAssistantMessages(), strategy:"legacy"});
   }
   return undefined;
 });
