@@ -36,6 +36,11 @@ def _optional_path(args):
     return value
 
 
+def _workspace_relative(path):
+    # Resolve both sides to avoid Windows short-name/case differences.
+    return str(path.resolve().relative_to(WORKSPACE.resolve()))
+
+
 def execute(action, args):
     if not isinstance(action, str) or action not in SUPPORTED_ACTIONS:
         raise ValueError("Unsupported action: " + str(action))
@@ -114,7 +119,7 @@ def execute(action, args):
             raise ValueError("File exceeds 1 MB limit")
         return {
             "ok": True,
-            "path": str(p.relative_to(WORKSPACE)),
+            "path": _workspace_relative(p),
             "content": p.read_text(encoding="utf-8", errors="replace"),
         }
 
@@ -127,7 +132,7 @@ def execute(action, args):
         # Exclusive creation avoids overwriting an existing file.
         with p.open("x", encoding="utf-8", newline="") as stream:
             stream.write(content)
-        return {"ok": True, "created": str(p.relative_to(WORKSPACE))}
+        return {"ok": True, "created": _workspace_relative(p)}
 
     raise ValueError("Unsupported action: " + str(action))
 
