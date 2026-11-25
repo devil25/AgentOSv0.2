@@ -6,8 +6,11 @@ const STOP_KEY = "agentos.stopped";
 const MAX_STEPS = 40;
 const RESPONSE_TIMEOUT_MINUTES = 8;
 const AUTONOMOUS_ACTIONS = new Set([
-  "runtime.status", "skills.list", "skills.read", "workspace.list",
-  "workspace.read_file", "workspace.create_file", "terminal.execute"
+  // Read-only discovery plus workspace-scoped project actions can run without
+  // per-step approval. External plugin/MCP calls and browser navigation remain supervised.
+  "runtime.status", "skills.list", "skills.read", "plugins.list",
+  "mcp.list", "mcp.tools", "workspace.list", "workspace.read_file",
+  "workspace.create_file", "terminal.execute"
 ]);
 const SUPPORTED_ACTIONS = new Set([
   "runtime.status", "skills.list", "plugins.list", "mcp.list", "mcp.tools",
@@ -310,6 +313,29 @@ async function processModelResponse(state, response) {
   }
   const issue = validateAction(action);
   if (issue) {
+    const oversizedTerminal = action?.action === "terminal.execute" &&
+      typeof action.arguments?.command === "string" &&
+      action.arguments.command.length > 12000;
+    if (oversizedTerminal) {
+      const retries = Number(ready.oversizedTerminalRetries || 0) + 1;
+      if (retries <= 2) {
+        const retryPrompt = [
+          "AgentOS rejected the proposed terminal action BEFORE executing it.",
+          "Do not repeat that terminal command and do not put file contents inside a shell command.",
+          "For this coding task, create each project file with one workspace.create_file action using a workspace-relative path and its content. Use terminal.execute only for short commands (under 12 KB), such as running tests or listing files.",
+          "Continue the original task from the current workspace. No part of the rejected command was executed.",
+          "Original task:", ready.task,
+          "Validation error:", issue,
+          "Rejected command length:", String(action.arguments.command.length), "characters"
+        ].join("\n\n");
+        const retryState = await writeTaskState({
+          ...ready, phase: "action_completed", action: null,
+          error: null, oversizedTerminalRetries: retries, prompt: retryPrompt
+        });
+        await sendPrompt(retryState, retryPrompt);
+        return;
+      }
+    }
     await writeTaskState({ ...ready, phase: "error", error: "Invalid model action: " + issue });
     return;
   }
