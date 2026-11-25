@@ -39,6 +39,7 @@
   const CHATGPT_RESPONSE_BODY_SELECTOR = "[data-response-body]";
   const CHATGPT_MESSAGE_OWNER_SELECTOR = "[data-chatgpt-selection-message-id]";
   const CHATGPT_MESSAGE_SOURCE_SELECTOR = "[data-dil-source-message-id]";
+  const CHATGPT_CONVERSATION_ID_SELECTOR = "[data-chatgpt-selection-conversation-id]";
 
   // A response body, its selection owner and its rendered source must identify
   // the same message. Conflicting IDs mean the DOM relationship is ambiguous.
@@ -50,6 +51,11 @@
     return ids[0];
   }
 
+  function resolveChatGPTConversationId(values) {
+    const ids = [...new Set((Array.isArray(values) ? values : []).filter(value => typeof value === "string" && value.trim()).map(value => value.trim()))];
+    return ids.length === 1 ? ids[0] : null;
+  }
+
   // Export the selector/identity contract for Node tests without executing browser code.
   if (typeof module !== "undefined" && module.exports && typeof document === "undefined") {
     module.exports = Object.freeze({
@@ -57,7 +63,9 @@
       CHATGPT_RESPONSE_BODY_SELECTOR,
       CHATGPT_MESSAGE_OWNER_SELECTOR,
       CHATGPT_MESSAGE_SOURCE_SELECTOR,
-      resolveChatGPTMessageId
+      CHATGPT_CONVERSATION_ID_SELECTOR,
+      resolveChatGPTMessageId,
+      resolveChatGPTConversationId
     });
     return;
   }
@@ -177,6 +185,12 @@
     return entries;
   }
 
+  function getChatGPTConversationId() {
+    if (provider?.id !== "chatgpt") return null;
+    const values = [...document.querySelectorAll(CHATGPT_CONVERSATION_ID_SELECTOR)].map(node => node.getAttribute("data-chatgpt-selection-conversation-id"));
+    return resolveChatGPTConversationId(values);
+  }
+
   function hasChatGPTContinuationMarker() {
     if (provider?.id !== "chatgpt") return false;
     const lines = (document.body?.innerText || "")
@@ -189,6 +203,7 @@
   function readAssistantResponse() {
     const composer = findComposer();
     const continuationMarker = hasChatGPTContinuationMarker();
+    const conversationId = getChatGPTConversationId();
 
     // New ChatGPT app-shell DOM: data-response-body provides the message
     // boundary; the nested assistant-message marker proves authorship; the
@@ -204,7 +219,8 @@
           strategy: "semantic selectors",
           candidates: entries.length,
           url: location.href,
-          continuationMarker
+          conversationId,
+continuationMarker
         };
       }
     }
@@ -250,7 +266,8 @@
         strategy: "semantic selectors",
         candidates: semantic.length,
         url: location.href,
-        continuationMarker
+        conversationId,
+continuationMarker
       };
     }
 
@@ -285,7 +302,8 @@
         strategy: "conversation text-block fallback",
         candidates: blocks.length,
         url: location.href,
-        continuationMarker
+        conversationId,
+continuationMarker
       };
     }
 
@@ -296,7 +314,8 @@
       strategy: "conversation root fallback",
       candidates: rootText.length ? 1 : 0,
       url: location.href,
-      continuationMarker
+      conversationId,
+continuationMarker
     };
   }
 
@@ -412,6 +431,7 @@
       provider: provider?.id || "unknown",
       providerName: provider?.name || "Unsupported AI website",
       url: location.href,
+      conversationId: response.conversationId,
       title: document.title,
       composerAvailable: Boolean(composer),
       assistantMessages: response.messages,
@@ -502,6 +522,7 @@
           messages: snapshot.messages,
           messageIds: snapshot.messageIds || [],
           url: snapshot.url || location.href,
+          conversationId: snapshot.conversationId || null,
           provider: provider?.id || "unknown",
           strategy: snapshot.strategy,
           continuationMarker: snapshot.continuationMarker
