@@ -8,7 +8,7 @@ test("recognizes current ChatGPT app-shell assistant ownership markers", () => {
     '[data-content-search-unit-key$=":assistant"]',
     '[data-markdown-text-style="assistant-message"]',
     '[data-conversation-role="assistant"]',
-    '[data-turn-key]:has([data-conversation-role="assistant"], [data-chatgpt-agent-turn-start])',
+    'section[data-turn="assistant"]',
     '[data-test-id^="conversation-turn-"][data-turn="assistant"]'
   ]) {
     assert.ok(
@@ -27,6 +27,7 @@ test("retains legacy ChatGPT assistant role selectors", () => {
 test("does not treat generic Markdown or prose classes as assistant ownership", () => {
   assert.ok(!CHATGPT_ASSISTANT_SELECTORS.includes(".markdown"));
   assert.ok(!CHATGPT_ASSISTANT_SELECTORS.includes(".prose"));
+  assert.ok(!CHATGPT_ASSISTANT_SELECTORS.includes('[data-turn-key]:has([data-conversation-role="assistant"], [data-chatgpt-agent-turn-start])'));
   assert.ok(!CHATGPT_ASSISTANT_SELECTORS.some(selector =>
     selector === '[class*="markdown" i]' || selector === '[class*="prose" i]'
   ));
