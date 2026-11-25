@@ -222,18 +222,33 @@ async function startTask(message) {
   await sendPrompt(state, prompt);
   return { ok: true, state: await readTaskState() };
 }
+async function reattachTaskTab(state) {
+  const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) throw new Error("Reopen the original AI conversation in a tab, then resume the task.");
+  const info = await tabRequest(tab.id, "AGENTOS_PROVIDER_INSPECT");
+  if (!info?.ok || !info.composerAvailable) throw new Error("The active tab is not a supported AI conversation. Reopen the task's AI website first.");
+  return { ...state, tabId: tab.id };
+}
 async function resumeTask() {
   const state = await readTaskState();
   if (!state) throw new Error("There is no saved task.");
   await setStopped(false);
   if (state.phase === "paused" && state.resumePhase === "awaiting_model") {
-    const resumed = await writeTaskState({ ...state, phase: "awaiting_model", resumePhase: null });
-    try { await handleAssistantSnapshot(resumed.tabId, await readProviderMessages(resumed.tabId)); } catch (_) {}
+    const attached = await reattachTaskTab(state);
+    const resumed = await writeTaskState({ ...attached, phase: "awaiting_model", resumePhase: null });
+    try {
+      await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
+      await handleAssistantSnapshot(resumed.tabId, await readProviderMessages(resumed.tabId));
+    } catch (_) {}
   } else if (state.phase === "paused" && state.resumePhase === "awaiting_approval") {
-    await writeTaskState({ ...state, phase: "awaiting_approval", resumePhase: null });
+    const attached = await reattachTaskTab(state);
+    await writeTaskState({ ...attached, phase: "awaiting_approval", resumePhase: null });
+  } else if (state.phase === "paused" && state.resumePhase === "action_completed" && state.prompt) {
+    const attached = await reattachTaskTab(state);
+    await sendPrompt(attached, state.prompt);
+  } else if (state.phase === "paused" && state.resumePhase === "executing") {
+    await writeTaskState({ ...state, phase: "interrupted", error: "The tab or extension stopped during an action. Its outcome is unknown; it was not replayed." });
   } else if (state.phase === "action_completed" && state.prompt) {
-    await sendPrompt(state, state.prompt);
-  } else if (state.phase === "paused" && state.prompt) {
     await sendPrompt(state, state.prompt);
   } else if (state.phase === "awaiting_approval") {
     try { await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_UPDATED", state }); } catch (_) {}
@@ -316,7 +331,7 @@ api.alarms.onAlarm.addListener(async alarm => {
 api.tabs.onRemoved.addListener(async tabId => {
   const state = await readTaskState();
   if (state?.tabId === tabId && !["completed", "cancelled", "error"].includes(state.phase)) {
-    await writeTaskState({ ...state, phase: "paused", error: "The AI website tab was closed. Reopen it and review the saved task before resuming." });
+    await writeTaskState({ ...state, phase: "paused", resumePhase: state.phase, error: "The AI website tab was closed. Reopen the same AI conversation in the active tab, then resume." });
   }
 });
 async function recoverInterruptedAction() {
