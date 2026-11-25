@@ -267,12 +267,25 @@ async function processModelResponse(state, response) {
 }
 async function handleAssistantSnapshot(tabId, messages, rawUrl) {
   const state = await readTaskState();
-  if (!state || state.phase !== "awaiting_model" || state.tabId !== tabId || await isStopped()) return;
-  if (rawUrl && !sameConversation(state, state.provider, rawUrl)) return;
+  if (!state || state.tabId !== tabId) {
+    return { ok: true, accepted: true, reason: "no-task-for-tab" };
+  }
+  if (rawUrl && !sameConversation(state, state.provider, rawUrl)) {
+    return { ok: true, accepted: true, reason: "different-conversation" };
+  }
+  if (["starting", "submitting_prompt"].includes(state.phase)) {
+    return { ok: true, accepted: false, reason: "task-transitioning" };
+  }
+  if (state.phase !== "awaiting_model" || await isStopped()) {
+    return { ok: true, accepted: true, reason: "task-not-awaiting-model" };
+  }
   const response = responseDelta(messages, state.baseline || []);
-  if (!response) return;
+  if (!response) {
+    return { ok: true, accepted: true, reason: "no-new-response" };
+  }
   await api.alarms.clear("agentos-response-timeout");
-  return processModelResponse(state, response);
+  await processModelResponse(state, response);
+  return { ok: true, accepted: true, reason: "response-processed" };
 }
 async function startTask(message) {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
