@@ -147,6 +147,7 @@ def execute(action, args):
 
     if action == "terminal.execute":
         command = _required_text(args, "command", 12000)
+        _validate_terminal_command(command)
         timeout = args.get("timeout_seconds", 120)
         if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 180:
             raise ValueError("'timeout_seconds' must be an integer from 1 to 180")
@@ -176,6 +177,7 @@ def execute(action, args):
             "stdout": stdout,
             "stderr": stderr,
             "command": command,
+            "execution_scope": "workspace working directory; not an OS sandbox",
         }
 
     if action == "workspace.create_file":
