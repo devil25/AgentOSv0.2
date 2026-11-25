@@ -36,7 +36,7 @@ class ActionTests(unittest.TestCase):
     def test_create_read_and_no_overwrite(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            with patch("agentos.actions.WORKSPACE", root), patch("agentos.paths.WORKSPACE", root):
+            with patch("agentos.paths.WORKSPACE", root):
                 created = execute(
                     "workspace.create_file",
                     {"path": "notes/summary.md", "content": "AgentOS test"},
@@ -53,7 +53,7 @@ class ActionTests(unittest.TestCase):
 
     def test_terminal_execute_uses_workspace_as_working_directory(self):
         completed = Mock(returncode=0, stdout="ok", stderr="")
-        with patch("agentos.actions.WORKSPACE", Path(tempfile.gettempdir())):
+        with patch("agentos.paths.WORKSPACE", Path(tempfile.gettempdir())):
             with patch("agentos.actions.subprocess.run", return_value=completed) as run:
                 result = execute("terminal.execute", {"command": "echo ok"})
         self.assertTrue(result["ok"])
@@ -61,13 +61,61 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["cwd"], str(Path(tempfile.gettempdir()).resolve()))
         self.assertFalse(run.call_args.kwargs["shell"])
 
-    def test_terminal_execute_blocks_host_level_destructive_commands(self):
-        with self.assertRaisesRegex(ValueError, "Blocked host-level"):
-            execute("terminal.execute", {"command": "format C:"})
+    def test_terminal_execute_allows_unrestricted_command_text(self):
+        completed = Mock(returncode=0, stdout="mocked", stderr="")
+        with patch("agentos.actions.subprocess.run", return_value=completed) as run:
+            result = execute("terminal.execute", {"command": "format C:"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(run.call_args.args[0][-1], "format C:")
+
+    def test_terminal_execute_allows_external_working_directory(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            with tempfile.TemporaryDirectory() as external:
+                completed = Mock(returncode=0, stdout="external", stderr="")
+                with patch("agentos.paths.WORKSPACE", Path(workspace)):
+                    with patch("agentos.actions.subprocess.run", return_value=completed) as run:
+                        result = execute("terminal.execute", {
+                            "command": "Get-Location",
+                            "cwd": external
+                        })
+                self.assertTrue(result["ok"])
+                self.assertEqual(run.call_args.kwargs["cwd"], str(Path(external).resolve()))
+                self.assertEqual(result["cwd"], str(Path(external).resolve()))
+
+    def test_terminal_execute_rejects_nonexistent_working_directory(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            missing = str(Path(workspace) / "does-not-exist")
+            with patch("agentos.paths.WORKSPACE", Path(workspace)):
+                with self.assertRaisesRegex(ValueError, "existing directory"):
+                    execute("terminal.execute", {"command": "Get-Location", "cwd": missing})
+
+    def test_terminal_execute_returns_partial_output_on_timeout(self):
+        timeout_error = __import__("subprocess").TimeoutExpired(
+            cmd=["powershell.exe"], timeout=2,
+            output=b"partial stdout", stderr=b"partial stderr"
+        )
+        with patch("agentos.actions.subprocess.run", side_effect=timeout_error):
+            result = execute("terminal.execute", {
+                "command": "Start-Sleep -Seconds 10",
+                "timeout_seconds": 2
+            })
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertEqual(result["stdout"], "partial stdout")
+        self.assertEqual(result["stderr"], "partial stderr")
+
+    def test_terminal_execute_accepts_timeout_up_to_600_seconds(self):
+        completed = Mock(returncode=0, stdout="ok", stderr="")
+        with patch("agentos.actions.subprocess.run", return_value=completed):
+            result = execute("terminal.execute", {
+                "command": "Get-Date",
+                "timeout_seconds": 600
+            })
+        self.assertTrue(result["ok"])
 
     def test_terminal_execute_rejects_invalid_timeout(self):
         with self.assertRaises(ValueError):
-            execute("terminal.execute", {"command": "echo ok", "timeout_seconds": 999})
+            execute("terminal.execute", {"command": "echo ok", "timeout_seconds": 601})
 
     def test_invalid_tool_arguments_are_rejected(self):
         with self.assertRaises(ValueError):
