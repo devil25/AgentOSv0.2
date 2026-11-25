@@ -41,10 +41,10 @@
       <div class="card">
         <div class="eyebrow">AUTONOMY MODE</div>
         <select id="autonomySelect" class="mode-select">
-          <option value="autonomous">Autonomous · execute project actions automatically</option>
+          <option value="autonomous">Autonomous · execute supported actions and PowerShell automatically</option>
           <option value="supervised" selected>Supervised · approve every action</option>
         </select>
-        <p class="muted hint">Autonomous mode runs supported project tools without per-step approval. Supervised mode pauses for your approval before each action. Terminal commands use your Windows account permissions; the project working directory is not an OS sandbox.</p>
+        <p class="muted hint">Autonomous mode runs supported actions, including PowerShell, without per-step approval. Supervised mode pauses for approval before each action. PowerShell runs with your Windows account permissions and is not restricted to the selected workspace. Only run tasks you trust.</p>
       </div>
       <div class="card">
         <div class="eyebrow">TASK</div>
