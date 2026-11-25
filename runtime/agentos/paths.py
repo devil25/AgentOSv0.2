@@ -45,7 +45,7 @@ def set_workspace(path: str) -> Path:
     if not candidate.exists() or not candidate.is_dir():
         raise ValueError("The selected workspace must be an existing directory")
     CONFIG.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps({"path": str(candidate)}, ensure_ascii=False, indent=2) + "\\n"
+    payload = json.dumps({"path": str(candidate)}, ensure_ascii=False, indent=2) + "\n"
     fd, temporary = tempfile.mkstemp(prefix="workspace-", suffix=".tmp", dir=str(CONFIG))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
