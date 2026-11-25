@@ -1,5 +1,16 @@
 const api = globalThis.browser;
 let stopped = false;
+const TASK_STATE_KEY = "agentos.taskState";
+
+async function readTaskState() {
+  const stored = await api.storage.local.get(TASK_STATE_KEY);
+  return stored[TASK_STATE_KEY] || null;
+}
+async function writeTaskState(state) {
+  await api.storage.local.set({ [TASK_STATE_KEY]: state });
+  return { ok: true };
+}
+
 
 api.action.onClicked.addListener(async () => {
   try {
@@ -11,11 +22,13 @@ api.action.onClicked.addListener(async () => {
 
 api.runtime.onMessage.addListener((message) => {
   if (message?.type === "AGENTOS_NATIVE_REQUEST") return nativeRequest(message.payload);
+  if (message?.type === "AGENTOS_TASK_STATE_GET") return readTaskState().then(state => ({ ok: true, state }));
+  if (message?.type === "AGENTOS_TASK_STATE_SET") return writeTaskState(message.state);
   if (message?.type === "AGENTOS_SET_STOP") {
     stopped = Boolean(message.value);
-    return Promise.resolve({ ok: true, stopped });
+    return api.storage.local.set({ "agentos.stopped": stopped }).then(() => ({ ok: true, stopped }));
   }
-  if (message?.type === "AGENTOS_GET_STOP") return Promise.resolve({ stopped });
+  if (message?.type === "AGENTOS_GET_STOP") return api.storage.local.get("agentos.stopped").then(value => { stopped = Boolean(value["agentos.stopped"]); return { stopped }; });
   if (message?.type === "AGENTOS_OPEN_URL") return openSafeUrl(message.url);
   if (message?.type === "AGENTOS_PAGE_INFO") return getPageInfo();
   if (message?.type === "AGENTOS_PROVIDER_INSPECT") return providerRequest("AGENTOS_PROVIDER_INSPECT");
