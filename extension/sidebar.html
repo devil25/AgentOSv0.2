@@ -25,6 +25,15 @@
         <div class="row"><button id="connectBtn" class="btn primary">Test Windows connection</button><button id="stopBtn" class="btn danger">Stop</button></div>
       </div>
       <div class="card">
+        <div class="eyebrow">WORKSPACE DIRECTORY</div>
+        <div id="workspacePath" class="page-title break">Loading workspace…</div>
+        <p class="muted hint">Choose the folder on this computer that AgentOS will use as its project workspace. File operations and terminal commands use this folder as their working directory.</p>
+        <div class="row">
+          <button id="chooseWorkspaceBtn" class="btn primary">Choose folder</button>
+          <button id="refreshWorkspaceBtn" class="btn secondary">Refresh</button>
+        </div>
+      </div>
+      <div class="card">
         <div class="eyebrow">AI WEBSITE BRIDGE</div>
         <div id="providerText" class="muted">Checking active tab…</div>
         <div class="row"><button id="providerCheckBtn" class="btn secondary">Detect provider</button><button id="readResponseBtn" class="btn secondary">Inspect latest response</button></div>
