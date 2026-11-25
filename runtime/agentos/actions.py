@@ -37,8 +37,9 @@ def _optional_path(args):
 
 
 def _workspace_relative(path):
+    # Use POSIX separators in returned paths on every operating system.
     # Resolve both sides to avoid Windows short-name/case differences.
-    return str(path.resolve().relative_to(WORKSPACE.resolve()))
+    return path.resolve().relative_to(WORKSPACE.resolve()).as_posix()
 
 
 def execute(action, args):
