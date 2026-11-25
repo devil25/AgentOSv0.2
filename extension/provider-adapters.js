@@ -31,13 +31,11 @@
     '[data-turn="assistant"]',
     '[data-testid^="conversation-turn-"][data-turn="assistant"]',
     '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
-    '[data-testid^="conversation-turn-"]:has([data-message-author-role="assistant"])',
-    '[data-test-id^="conversation-turn-"]:has([data-message-author-role="assistant"])',
-    '[data-turn-key]:has([data-conversation-role="assistant"], [data-chatgpt-agent-turn-start])',
+    'section[data-turn="assistant"]',
+    '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
     '[data-chatgpt-search-unit-key$=":assistant"]',
     '[data-content-search-unit-key$=":assistant"]',
     '[data-markdown-text-style="assistant-message"]',
-    '[class~="agent-turn"]'
   ]);
 
   // Export the selector contract for Node tests without executing browser code.
