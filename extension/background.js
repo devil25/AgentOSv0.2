@@ -323,6 +323,7 @@ async function processModelResponse(state, response) {
   if (approvalNeeded) return;
   await processAction(awaiting, true);
 }
+let responseProcessingTaskId = null;
 async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, continuationMarker = false) {
   let state = await readTaskState();
   if (!state || state.tabId !== tabId) {
@@ -368,9 +369,17 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
   if (!response) {
     return { ok: true, accepted: true, reason: "no-new-response" };
   }
-  await api.alarms.clear("agentos-response-timeout");
-  await processModelResponse(state, response);
-  return { ok: true, accepted: true, reason: "response-processed" };
+  if (responseProcessingTaskId === state.id) {
+    return { ok: true, accepted: true, reason: "response-already-processing" };
+  }
+  responseProcessingTaskId = state.id;
+  try {
+    await api.alarms.clear("agentos-response-timeout");
+    await processModelResponse(state, response);
+    return { ok: true, accepted: true, reason: "response-processed" };
+  } finally {
+    if (responseProcessingTaskId === state.id) responseProcessingTaskId = null;
+  }
 }
 async function startTask(message) {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
@@ -537,8 +546,31 @@ api.runtime.onMessage.addListener((message, sender) => {
 
 api.alarms.onAlarm.addListener(async alarm => {
   if (alarm.name !== "agentos-response-timeout") return;
-  const state = await readTaskState();
-  if (state?.phase === "awaiting_model") {
+  let state = await readTaskState();
+  if (state?.phase !== "awaiting_model") return;
+  if (responseProcessingTaskId === state.id) return;
+
+  // Last-chance reconciliation: a provider response can become stable at the
+  // same moment the timeout alarm fires (notably during ChatGPT continuation).
+  // Re-read twice before failing so a completed semantic assistant turn is not
+  // discarded merely because its observer snapshot arrived late.
+  try {
+    const first = await readProviderMessages(state.tabId);
+    if (first.strategy === "semantic selectors" && first.messages.length) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const second = await readProviderMessages(state.tabId);
+      if (second.strategy === "semantic selectors" &&
+          JSON.stringify(first.messages) === JSON.stringify(second.messages)) {
+        await handleAssistantSnapshot(
+          state.tabId, second.messages, second.url, second.strategy,
+          second.continuationMarker
+        );
+      }
+    }
+  } catch (_) {}
+
+  state = await readTaskState();
+  if (state?.phase === "awaiting_model" && responseProcessingTaskId !== state.id) {
     await writeTaskState({ ...state, phase: "error", error: "Timed out waiting for a completed response from the AI website. The prompt was not sent again." });
   }
 });
