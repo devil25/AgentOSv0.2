@@ -63,10 +63,10 @@ function setRuntime(ok, message) {
 async function loadWorkspace() {
   const result = await native({ type: "workspace.get" });
   if (!result?.ok) {
-    $("workspacePath").textContent = result?.error || "Workspace unavailable";
+    $("workspacePath").value = result?.error || "Workspace unavailable";
     return result;
   }
-  $("workspacePath").textContent = result.path;
+  $("workspacePath").value = result.path;
   return result;
 }
 async function chooseWorkspace() {
@@ -78,7 +78,7 @@ async function chooseWorkspace() {
     if (result.cancelled) {
       out("Folder selection cancelled. The current workspace was kept.");
     } else {
-      $("workspacePath").textContent = result.path;
+      $("workspacePath").value = result.path;
       out({ ok: true, workspace: result.path, note: "New workspace saved. Future workspace and terminal actions will use this folder." });
     }
   } catch (error) {
@@ -108,7 +108,7 @@ async function sendTask() {
   try {
     const workspace = await native({ type: "workspace.get" });
     if (!workspace?.ok) throw new Error(workspace?.error || "Could not read the selected workspace folder.");
-    $("workspacePath").textContent = workspace.path;
+    $("workspacePath").value = workspace.path;
     const result = await api.runtime.sendMessage({
       type: "AGENTOS_TASK_START",
       task,
