@@ -1,6 +1,10 @@
 (() => {
   "use strict";
 
+  // Content scripts must use the WebExtension runtime to deliver snapshots
+  // to the background task controller.
+  const api = globalThis.browser;
+
   const PROVIDERS = {
     "chat.z.ai": { id: "zai", name: "Z.ai" },
     "chatgpt.com": { id: "chatgpt", name: "ChatGPT" },
