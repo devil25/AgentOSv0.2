@@ -158,6 +158,31 @@ function responseDelta(messages, baseline) {
 }
 async function sendPrompt(state, prompt) {
   if (await isStopped()) return;
+
+  // ChatGPT can block further messages when its context window is full.
+  // Click the New chat button in that specific notice, then wait for the
+  // continuation conversation to become active before sending the same task.
+  if (state.provider === "chatgpt") {
+    const handoff = await tabRequest(state.tabId, "AGENTOS_PROVIDER_HANDOFF");
+    if (handoff?.handedOff && handoff.url) {
+      state = await writeTaskState({
+        ...state,
+        tabId: state.tabId,
+        providerUrl: handoff.url,
+        conversationTransfer: {
+          ...(state.conversationTransfer || {}),
+          from: state.providerUrl,
+          to: handoff.url,
+          at: new Date().toISOString(),
+          method: "chatgpt-context-window-new-chat"
+        }
+      });
+    } else if (handoff?.ok === false) {
+      await writeTaskState({ ...state, phase: "error", error: handoff.error || "ChatGPT conversation handoff failed." });
+      return;
+    }
+  }
+
   const snapshot = await readProviderMessages(state.tabId);
   const baseline = snapshot.messages;
   const submitting = await writeTaskState({
