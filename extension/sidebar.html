@@ -27,11 +27,19 @@
       <div class="card">
         <div class="eyebrow">AI WEBSITE BRIDGE</div>
         <div id="providerText" class="muted">Checking active tab…</div>
-        <div class="row"><button id="providerCheckBtn" class="btn secondary">Detect provider</button><button id="readResponseBtn" class="btn secondary">Read AI response</button></div>
+        <div class="row"><button id="providerCheckBtn" class="btn secondary">Detect provider</button><button id="readResponseBtn" class="btn secondary">Inspect latest response</button></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow">AUTONOMY MODE</div>
+        <select id="autonomySelect" class="mode-select">
+          <option value="autonomous">Autonomous · execute project actions automatically</option>
+          <option value="supervised" selected>Supervised · approve every action</option>
+        </select>
+        <p class="muted hint">Autonomous mode runs supported project tools without per-step approval. Supervised mode pauses for your approval before each action.</p>
       </div>
       <div class="card">
         <div class="eyebrow">TASK</div>
-        <p class="muted hint">Text-only tasks are answered directly. AgentOS proposes a tool action only when the task needs one. AI actions are reviewed and approved before execution.</p>
+        <p class="muted hint">Send one task. AgentOS will monitor the model response, execute approved actions, return real results to the same conversation, and continue automatically.</p>
         <textarea id="taskInput" placeholder="Describe what you want AgentOS to do…"></textarea>
         <button id="sendTaskBtn" class="btn primary full">Send task to active AI website</button>
       </div>
@@ -46,7 +54,14 @@
         <p class="muted hint">Only supported, valid JSON actions are loaded here. Review the complete action before running it.</p>
         <textarea id="commandInput" spellcheck="false" placeholder='{"protocol":"agentos.v1","type":"action","action":"workspace.create_file","arguments":{"path":"notes/hello.txt","content":"Hello"}}'></textarea>
         <button id="runBtn" class="btn primary full">Validate & run action</button>
-        <button id="continueBtn" class="btn secondary full" disabled>Send result to AI to continue task</button>
+        <div id="approvalCard" class="approval-card" hidden>
+          <div class="eyebrow">ACTION APPROVAL REQUIRED</div>
+          <pre id="approvalDetails" class="output"></pre>
+          <div class="row">
+            <button id="approveActionBtn" class="btn primary">Approve & execute</button>
+            <button id="rejectActionBtn" class="btn danger">Reject</button>
+          </div>
+        </div>
       </div>
       <div class="card">
         <div class="eyebrow">RESULT / LOG</div>
