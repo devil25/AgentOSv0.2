@@ -1,165 +1,96 @@
-# AgentOS v0.1.0 — Windows + Firefox
+# AgentOS v0.2.0-dev — Windows + Firefox
 
-حزمة أولية قابلة للتشغيل لإضافة Firefox ومحرك Windows محلي. تتضمن:
+AgentOS is a supervised browser-agent project. The AI model runs in a supported website tab; AgentOS connects that website to a local Windows runtime and a controlled set of tools. This project does **not** use model APIs or local LLMs.
 
-- Firefox WebExtension Manifest V3 مع لوحة جانبية.
-- Native Messaging Host لمحرك Windows (Python، ثم PyInstaller EXE).
-- بروتوكول JSON موحد ومحدد للأوامر.
-- إدارة Agent Skills وفق تنسيق `SKILL.md` المفتوح.
-- مدير Plugins ببيانات وصفية ومراجعة/تفعيل صريح.
-- إعدادات MCP وإمكانية استعراض الأدوات واستدعاء الأدوات المسموح بها عبر stdio.
-- مساحة عمل محلية مقيدة داخل `workspace`.
-- سجل عمليات، وإيقاف طارئ، وقائمة سماح للأوامر الحساسة.
+## v0.2 development direction
 
-> **حدود v0.1:** لا يوجد اتصال API بنموذج. الإضافة لا تستطيع جعل ChatGPT/Claude/Gemini يرسل أدوات تلقائياً لمجرد فتح الموقع. في هذا الإصدار يقرأ المستخدم رد الموقع ويُلصق كتلة JSON من نوع `agentos.v1` في لوحة AgentOS، أو يستخدم زر التقاط الصفحة. يمكن لاحقاً تطوير موصلات واجهة لكل موقع، لكنها هشة وتتطلب اختباراً عند تغير تصميم المواقع.
+- **AI source:** web UI only; Z.ai is the primary provider, followed by ChatGPT, Claude, and Gemini.
+- **Autonomy:** hybrid and supervised. Reading provider output is separate from executing an action. The user must approve submitting a task to the AI website and review actions before execution.
+- **Browser integration:** DOM-based adapters. Website markup can change, so selectors require maintenance and site-specific testing.
+- **Tools:** existing local workspace, Skills, Plugins, and configured MCP tools. No arbitrary PowerShell or shell execution.
+- **Safety:** workspace file access stays restricted to the AgentOS workspace. MCP and Python plugins run with the Windows user's permissions; only configure code you trust.
 
-## متطلبات
+## Current v0.2 development features
+
+- Firefox sidebar now detects Z.ai, ChatGPT, Claude, and Gemini tabs.
+- The sidebar can fill a task into the active AI website and asks before submitting it.
+- It can read detected assistant messages and offer a fenced JSON action for manual review.
+- It asks for confirmation before running a proposed action.
+- Z.ai support is included for `https://chat.z.ai/` and is not limited to one conversation URL.
+- The corrected `.gitignore` excludes local logs, backups, private MCP config, and Native Messaging runtime config.
+
+**Important:** this is an early development build, not a finished autonomous agent. It does not yet have a persistent planner/execution/evaluation loop. Provider DOM selectors are heuristic and may need adjustment after testing against the live websites. AI-generated actions are untrusted input and must be reviewed.
+
+## Requirements
 
 - Windows 10/11 64-bit
-- Firefox حديث يدعم WebExtensions MV3 و `sidebar_action`
-- Python 3.11 أو أحدث (للتطوير والبناء)
-- Node.js غير مطلوب لهذه النسخة؛ ملفات الإضافة جاهزة دون build step
-- Git (لاستيراد المهارات والمكونات من GitHub)
+- Firefox 128 or newer
+- Python 3.11+
+- Git
+- Optional: dependencies listed in `requirements-mcp.txt` for the demo MCP server
 
-## تثبيت سريع
+## Development install
 
-1. فك الضغط إلى `D:\AgentOS`.
-2. افتح PowerShell داخل `D:\AgentOS`.
-3. شغّل:
+Use the project directory where you cloned or extracted AgentOS. In this user's current setup it is:
 
 ```powershell
+cd D:\AgentOS-v0.1.0-Windows\AgentOS
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup.ps1
 ```
 
-4. افتح Firefox ثم `about:debugging#/runtime/this-firefox`.
-5. اختر **Load Temporary Add-on** وحدد `D:\AgentOS\extension\manifest.json`.
-6. اضغط أيقونة AgentOS أو افتح القائمة الجانبية من Firefox.
+Load `extension\manifest.json` temporarily from `about:debugging#/runtime/this-firefox`.
 
-الإضافة تعمل مؤقتاً حتى إعادة تشغيل Firefox؛ للتوزيع الدائم يلزم توقيع AMO أو تثبيت مؤسسي مناسب.
-
-## بناء وتسجيل Native Host
+Build and register the Native Messaging host:
 
 ```powershell
 .\scripts\build-host.ps1
 .\scripts\install-host.ps1
 ```
 
-ثم أعد تحميل الإضافة وافتح لوحة AgentOS واضغط **اختبار اتصال Windows**.
+Restart/reload the extension and test the Windows runtime from the sidebar.
 
-## تشغيل اختبارات المحرك
+## Run tests
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python -m unittest discover -s runtime\tests -v
 ```
 
-## المهارات Skills
+## Configuration
 
-المجلد الافتراضي: `D:\AgentOS\skills`
+- Copy `config\mcp_servers.example.json` to `config\mcp_servers.json` and configure only reviewed local MCP servers.
+- `config\mcp_servers.json` is intentionally ignored by Git.
+- `runtime\com.agentos.host.json` is generated locally by the host installer and is intentionally ignored.
+- Do not commit API keys, passwords, tokens, or private configuration.
 
-```powershell
-python runtime\agentos_cli.py skills list
-python runtime\agentos_cli.py skills install-github https://github.com/OWNER/REPO
-```
-
-يدعم المستورد مستودعات Git التي تحتوي مجلدات بها `SKILL.md`. لا يتم تشغيل سكربتات المهارة تلقائياً. اقرأ `SKILL.md` وراجع أي scripts قبل استخدامها.
-
-المعيار: [Agent Skills](https://github.com/agentskills/agentskills).
-
-## Plugins
-
-ضع مجلد كل إضافة داخل `D:\AgentOS\plugins` مع `plugin.json`. يمكن استيراد الإضافات من GitHub عبر CLI. الإضافات الخارجية غير موثوقة افتراضياً ولا يتم تشغيلها تلقائياً. بعد مراجعة الكود، استخدم أوامر trust ثم enable. تذكر أن Python plugin يعمل بصلاحيات حساب Windows، ولا يوجد sandbox حقيقي له في v0.1.
-
-```powershell
-python runtime\agentos_cli.py plugins list
-python runtime\agentos_cli.py plugins inspect example-hello
-python runtime\agentos_cli.py plugins install-github OWNER/REPO
-# بعد مراجعة كود الإضافة فقط:
-python runtime\agentos_cli.py plugins trust PLUGIN_ID
-python runtime\agentos_cli.py plugins enable PLUGIN_ID
-```
-
-## مصادر GitHub المقترحة للمهارات
-
-- `https://github.com/agentskills/agentskills` — المواصفة المفتوحة وأدوات التحقق من تنسيق المهارات.
-- `https://github.com/anthropics/skills` — مجموعة مهارات وأمثلة.
-- `https://github.com/openai/skills` — مجموعة مهارات وأمثلة لـ Codex.
-
-مثال استيراد مستودع مهارات: `python runtime\agentos_cli.py skills install-github anthropics/skills`. قد يحتوي المستودع على عدة مهارات؛ راجع كل مهارة ومحتوياتها قبل استخدامها. لا يتم تشغيل scripts تلقائياً.
-
-## MCP
-
-إعداد الخدمات في `D:\AgentOS\config\mcp_servers.json`. يدعم هذا الإصدار خوادم MCP المحلية عبر `stdio` مع بروتوكول JSON-RPC، ويتيح `tools/list` و`tools/call` للأدوات المسموح بها فقط. يمكن للوكيل طلب `mcp.tools` و`mcp.call` بعد ضبط allowlist.
-
-1. انسخ `config\mcp_servers.example.json` إلى `config\mcp_servers.json`.
-2. عدّل `command`, `args`, `enabled`, و`allowed_tools` لخادم تثق به.
-3. لتجربة خادم MCP التجريبي، ثبّت الاعتمادية الاختيارية: `python -m pip install -r requirements-mcp.txt` ثم أضف إعداداً مثل:
-
-```json
-{
-  "servers": {
-    "agentos-demo": {
-      "description": "AgentOS demo MCP server",
-      "enabled": true,
-      "command": "D:\\AgentOS\\.venv\\Scripts\\python.exe",
-      "args": ["D:\\AgentOS\\examples\\mcp_demo_server.py"],
-      "allowed_tools": ["echo", "add"]
-    }
-  }
-}
-```
-
-4. اعرض الخدمات والأدوات:
-
-```powershell
-python runtime\agentos_cli.py mcp list
-python runtime\agentos_cli.py mcp tools agentos-demo
-```
-
-لا تضف خادماً من الإنترنت أو GitHub قبل مراجعة مصدره وأوامره. خادم MCP يعمل بصلاحيات حساب Windows الذي يشغله.
-
-## بروتوكول AgentOS
-
-في لوحة الإضافة الصق كتلة مثل:
+## Supported action envelope
 
 ```json
 {
   "protocol": "agentos.v1",
   "type": "action",
   "action": "workspace.create_file",
-  "arguments": {"path": "notes/hello.txt", "content": "Hello from AgentOS"}
+  "arguments": {
+    "path": "notes/hello.txt",
+    "content": "Hello from AgentOS"
+  }
 }
 ```
 
-الأوامر المدعومة افتراضياً: `runtime.status`, `skills.list`, `plugins.list`, `mcp.list`, `workspace.list`, `workspace.read_file`, `workspace.create_file`, `browser.open_url`.
+## Security notes
 
-`browser.open_url` ينفذ داخل Firefox بعد تحقق الإضافة من أن الرابط http/https. تتوفر `skills.read` و`plugins.call` و`mcp.tools` و`mcp.call` مع ضوابط التفعيل والثقة وقائمة السماح. لا يوجد `terminal.execute` أو تنفيذ أوامر PowerShell اعتباطية في هذه النسخة.
+- Workspace paths are resolved and checked to prevent path traversal.
+- File writes create new files only; overwrite is not enabled.
+- No general-purpose terminal execution is implemented.
+- MCP servers and Python plugins execute with the current Windows user's permissions. They are not sandboxed by AgentOS.
+- Do not enable third-party plugins or MCP servers before reviewing their source and commands.
+- Browser automation can interact with logged-in sessions. Keep explicit confirmation for any action that sends, publishes, deletes, purchases, or changes account data.
 
-## الأمان
+## Planned milestones
 
-- كل عمليات الملفات محصورة داخل `D:\AgentOS\workspace` مع منع traversal والروابط الرمزية خارج المساحة.
-- لا يوجد shell عام في v0.1.
-- MCP معطل افتراضياً، واستدعاء الأدوات يتطلب `allowed_tools`.
-- لا يتم تشغيل مهارات أو Plugins من GitHub تلقائياً.
-- سجل الأحداث في `logs\agentos.log`.
-- زر Stop يوقف استقبال الأوامر الجديدة من الواجهة؛ لا يمكن ضمان قتل عملية خارجية بدأت بالفعل في خادم MCP.
-
-## بنية المشروع
-
-```text
-AgentOS/
-  extension/        Firefox add-on
-  runtime/          Python Native Host + CLI + tests
-  skills/           Imported Agent Skills
-  plugins/          Plugins and manifests
-  config/           MCP and runtime configuration
-  protocol/         JSON schemas and examples
-  workspace/        Sandboxed file workspace
-  logs/             Audit log
-  scripts/          Windows setup/build/install scripts
-```
-
-## التراخيص
-
-كود AgentOS في هذه الحزمة مرخص MIT. مواصفات Agent Skills وMCP والمكونات الخارجية تحت تراخيص أصحابها؛ راجع مستودع كل مشروع قبل إعادة التوزيع.
+1. Stabilize provider adapters and verify selectors on each supported website.
+2. Add structured task plans and a durable execution state machine.
+3. Add policy checks, per-tool approval, cancellation, and audit records.
+4. Add result evaluation and bounded continuation with loop/time limits.
+5. Expand automated tests and package a reproducible Windows release.
