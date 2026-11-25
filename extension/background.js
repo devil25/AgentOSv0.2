@@ -72,7 +72,8 @@ async function setStopped(value) {
   return Boolean(value);
 }
 async function nativeRequest(payload) {
-  if (await isStopped() && payload?.type !== "runtime.status") {
+  const safeControlRequest = ["runtime.status", "workspace.get", "workspace.select_directory"].includes(payload?.type);
+  if (await isStopped() && !safeControlRequest) {
     return { ok: false, error: "AgentOS is stopped. Resume it before running actions." };
   }
   return new Promise((resolve) => {
