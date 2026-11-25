@@ -1,6 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { CHATGPT_ASSISTANT_SELECTORS } = require("../provider-adapters.js");
+const {
+  CHATGPT_ASSISTANT_SELECTORS,
+  CHATGPT_RESPONSE_BODY_SELECTOR,
+  CHATGPT_MESSAGE_OWNER_SELECTOR,
+  CHATGPT_MESSAGE_SOURCE_SELECTOR,
+  resolveChatGPTMessageId
+} = require("../provider-adapters.js");
 
 test("recognizes current ChatGPT app-shell assistant ownership markers", () => {
   for (const selector of [
@@ -31,4 +37,19 @@ test("does not treat generic Markdown or prose classes as assistant ownership", 
   assert.ok(!CHATGPT_ASSISTANT_SELECTORS.some(selector =>
     selector === '[class*="markdown" i]' || selector === '[class*="prose" i]'
   ));
+});
+
+
+test("recognizes the current ChatGPT response-body ownership structure", () => {
+  assert.equal(CHATGPT_RESPONSE_BODY_SELECTOR, "[data-response-body]");
+  assert.equal(CHATGPT_MESSAGE_OWNER_SELECTOR, "[data-chatgpt-selection-message-id]");
+  assert.equal(CHATGPT_MESSAGE_SOURCE_SELECTOR, "[data-dil-source-message-id]");
+});
+
+test("accepts a ChatGPT message only when its boundary, owner and source IDs agree", () => {
+  const id = "83fa5080-c4b9-4c86-8f5c-338ed91f99dc";
+  assert.equal(resolveChatGPTMessageId(id, id, id), id);
+  assert.equal(resolveChatGPTMessageId(id, id, ""), id);
+  assert.equal(resolveChatGPTMessageId(id, "different-message", id), null);
+  assert.equal(resolveChatGPTMessageId("", "", ""), null);
 });
