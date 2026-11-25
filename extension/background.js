@@ -223,7 +223,8 @@ async function resumeTask() {
   if (!state) throw new Error("There is no saved task.");
   await setStopped(false);
   if (state.phase === "paused" && state.resumePhase === "awaiting_model") {
-    await writeTaskState({ ...state, phase: "awaiting_model", resumePhase: null });
+    const resumed = await writeTaskState({ ...state, phase: "awaiting_model", resumePhase: null });
+    try { await handleAssistantSnapshot(resumed.tabId, await readProviderMessages(resumed.tabId)); } catch (_) {}
   } else if (state.phase === "paused" && state.resumePhase === "awaiting_approval") {
     await writeTaskState({ ...state, phase: "awaiting_approval", resumePhase: null });
   } else if (state.phase === "action_completed" && state.prompt) {
@@ -306,9 +307,11 @@ api.tabs.onRemoved.addListener(async tabId => {
     await writeTaskState({ ...state, phase: "paused", error: "The AI website tab was closed. Reopen it and review the saved task before resuming." });
   }
 });
-api.runtime.onStartup.addListener(async () => {
+async function recoverInterruptedAction() {
   const state = await readTaskState();
   if (state?.phase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "Firefox restarted during an action. Its outcome is unknown; it was not replayed." });
   }
-});
+}
+api.runtime.onStartup.addListener(recoverInterruptedAction);
+api.runtime.onInstalled.addListener(recoverInterruptedAction);
