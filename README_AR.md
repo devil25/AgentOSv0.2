@@ -1,96 +1,111 @@
-# AgentOS v0.2.0-dev — Windows + Firefox
+# AgentOS v0.2.0-rc1 — وكيل متصفح بإشراف المستخدم
 
-AgentOS is a supervised browser-agent project. The AI model runs in a supported website tab; AgentOS connects that website to a local Windows runtime and a controlled set of tools. This project does **not** use model APIs or local LLMs.
+AgentOS مشروع لوكيل متصفح يعمل على Windows وFirefox. يستخدم نموذج الذكاء الاصطناعي من خلال واجهة موقعه داخل المتصفح، ثم يربط مقترحات النموذج بأدوات محلية محددة وآمنة نسبياً.
 
-## v0.2 development direction
+**مصدر الذكاء:** مواقع الويب فقط (Z.ai أولاً، ثم ChatGPT وClaude وGemini). لا يستخدم المشروع مفاتيح API ولا يشغّل نموذجاً محلياً.
 
-- **AI source:** web UI only; Z.ai is the primary provider, followed by ChatGPT, Claude, and Gemini.
-- **Autonomy:** hybrid and supervised. Reading provider output is separate from executing an action. The user must approve submitting a task to the AI website and review actions before execution.
-- **Browser integration:** DOM-based adapters. Website markup can change, so selectors require maintenance and site-specific testing.
-- **Tools:** existing local workspace, Skills, Plugins, and configured MCP tools. No arbitrary PowerShell or shell execution.
-- **Safety:** workspace file access stays restricted to the AgentOS workspace. MCP and Python plugins run with the Windows user's permissions; only configure code you trust.
+**الاستقلالية:** هجينة وتحت إشراف المستخدم. يجيب النموذج مباشرة عن مهام النصوص، ويقترح إجراءً واحداً عندما تحتاج المهمة إلى أداة. يراجع AgentOS الإجراء ويطلب موافقة المستخدم قبل تنفيذه. بعد ظهور نتيجة الإجراء، يمكن للمستخدم إرسالها إلى النموذج ليخطط للخطوة التالية.
 
-## Current v0.2 development features
+> هذه نسخة مرشحة للاختبار (Release Candidate)، وليست إصداراً تم التحقق منه على جميع المواقع والأجهزة. يجب اختبار كل موقع وموصل MCP محلياً قبل الاستخدام الفعلي.
 
-- Firefox sidebar now detects Z.ai, ChatGPT, Claude, and Gemini tabs.
-- The sidebar can fill a task into the active AI website and asks before submitting it.
-- It can read detected assistant messages and offer a fenced JSON action for manual review.
-- It asks for confirmation before running a proposed action.
-- Z.ai support is included for `https://chat.z.ai/` and is not limited to one conversation URL.
-- The corrected `.gitignore` excludes local logs, backups, private MCP config, and Native Messaging runtime config.
+## ما تتضمنه النسخة
 
-**Important:** this is an early development build, not a finished autonomous agent. It does not yet have a persistent planner/execution/evaluation loop. Provider DOM selectors are heuristic and may need adjustment after testing against the live websites. AI-generated actions are untrusted input and must be reviewed.
+- إضافة Firefox مع لوحة جانبية لـ AgentOS.
+- دعم مبدئي لمواقع Z.ai وChatGPT وClaude وGemini.
+- اكتشاف صفحة النموذج وقراءة رد المساعد عبر محددات DOM مرنة؛ قد تتغير هذه المحددات عندما تتغير المواقع.
+- توجيه المهام النصية إلى إجابة مباشرة دون إنشاء ملف أو استدعاء أداة.
+- استخراج إجراءات JSON المدعومة فقط، والتحقق من بنيتها قبل عرضها للمراجعة.
+- موافقة منفصلة قبل إرسال المهمة إلى موقع الذكاء الاصطناعي وقبل تنفيذ الإجراء.
+- إمكانية إعادة نتيجة الإجراء إلى النموذج للانتقال إلى خطوة لاحقة، بحد أقصى 8 خطوات لكل مهمة من خلال الواجهة.
+- أدوات Workspace لعرض الملفات وقراءتها وإنشاء ملفات جديدة دون الكتابة فوق الملفات الموجودة.
+- عرض Skills وPlugins وخوادم MCP المهيأة.
+- قيود على حجم رسائل Native Messaging وقراءة/كتابة ملفات مساحة العمل.
+- مهلات زمنية لطلبات MCP وتنظيف عملية الخادم بعد انتهاء الطلب.
 
-## Requirements
+## ما لا تفعله النسخة
 
-- Windows 10/11 64-bit
-- Firefox 128 or newer
-- Python 3.11+
-- Git
-- Optional: dependencies listed in `requirements-mcp.txt` for the demo MCP server
+- لا تشغّل حلقة مستقلة في الخلفية ولا تنفذ سلسلة إجراءات دون موافقة المستخدم.
+- لا تنفذ أوامر PowerShell أو CMD عشوائية.
+- لا ترسل رسائل أو تنشر محتوى أو تشتري أو تحذف أو تغيّر بيانات حسابات.
+- لا تعزل خوادم MCP أو Plugins داخل Sandbox. تعمل هذه البرامج بصلاحيات مستخدم Windows؛ لذلك لا تفعّل إلا ما راجعت مصدره وتثق به.
+- قراءة رد الموقع تعتمد على DOM وقد تتطلب إصلاحاً عند تغيّر واجهة الموقع.
 
-## Development install
+## المتطلبات
 
-Use the project directory where you cloned or extracted AgentOS. In this user's current setup it is:
+- Windows 10/11 بنظام 64-bit.
+- Firefox 128 أو أحدث.
+- Python 3.11 أو أحدث.
+- Git.
+- اتصال بالإنترنت للوصول إلى مواقع الذكاء الاصطناعي.
+- PyInstaller يُثبّت أثناء بناء Native Host.
+
+## التثبيت والتشغيل
+
+افتح PowerShell داخل مجلد المشروع الحالي:
 
 ```powershell
 cd D:\AgentOS-v0.1.0-Windows\AgentOS
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup.ps1
-```
-
-Load `extension\manifest.json` temporarily from `about:debugging#/runtime/this-firefox`.
-
-Build and register the Native Messaging host:
-
-```powershell
 .\scripts\build-host.ps1
 .\scripts\install-host.ps1
 ```
 
-Restart/reload the extension and test the Windows runtime from the sidebar.
+بعد تسجيل Native Messaging Host:
 
-## Run tests
+1. افتح Firefox واكتب `about:debugging#/runtime/this-firefox`.
+2. اضغط **Load Temporary Add-on** واختر `extension\manifest.json`.
+3. افتح موقعاً مدعوماً مثل `https://chat.z.ai/`.
+4. افتح لوحة AgentOS، ثم اضغط **Test Windows connection** و **Detect provider**.
+5. اكتب مهمة نصية بسيطة واضغط **Send task to active AI website**، ثم وافق على الإرسال.
+6. بعد ظهور رد النموذج اضغط **Read AI response**.
+7. إن اقترح النموذج إجراءً، راجعه في مربع **Review AI action** ثم وافق على تشغيله.
+8. بعد نجاح الإجراء، استخدم **Send result to AI to continue task** عند الحاجة إلى خطوة إضافية.
+
+## الاختبارات
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python -m unittest discover -s runtime\tests -v
+.\.venv\Scripts\python.exe -m unittest discover -s runtime\tests -v
 ```
 
-## Configuration
+أو:
 
-- Copy `config\mcp_servers.example.json` to `config\mcp_servers.json` and configure only reviewed local MCP servers.
-- `config\mcp_servers.json` is intentionally ignored by Git.
-- `runtime\com.agentos.host.json` is generated locally by the host installer and is intentionally ignored.
-- Do not commit API keys, passwords, tokens, or private configuration.
-
-## Supported action envelope
-
-```json
-{
-  "protocol": "agentos.v1",
-  "type": "action",
-  "action": "workspace.create_file",
-  "arguments": {
-    "path": "notes/hello.txt",
-    "content": "Hello from AgentOS"
-  }
-}
+```powershell
+.\scripts\run-tests.ps1
 ```
 
-## Security notes
+الاختبارات المحلية لا تغني عن تجربة Firefox الحية على كل موقع مدعوم.
 
-- Workspace paths are resolved and checked to prevent path traversal.
-- File writes create new files only; overwrite is not enabled.
-- No general-purpose terminal execution is implemented.
-- MCP servers and Python plugins execute with the current Windows user's permissions. They are not sandboxed by AgentOS.
-- Do not enable third-party plugins or MCP servers before reviewing their source and commands.
-- Browser automation can interact with logged-in sessions. Keep explicit confirmation for any action that sends, publishes, deletes, purchases, or changes account data.
+## إعداد MCP
 
-## Planned milestones
+انسخ ملف المثال:
 
-1. Stabilize provider adapters and verify selectors on each supported website.
-2. Add structured task plans and a durable execution state machine.
-3. Add policy checks, per-tool approval, cancellation, and audit records.
-4. Add result evaluation and bounded continuation with loop/time limits.
-5. Expand automated tests and package a reproducible Windows release.
+```powershell
+Copy-Item config\mcp_servers.example.json config\mcp_servers.json
+```
+
+عدّل الإعدادات يدوياً، واترك الخادم معطلاً حتى تراجع الأمر والوسائط وقائمة `allowed_tools`. لا تضع كلمات مرور أو مفاتيح وصول في ملفات Git.
+
+## الأمان وحدود الثقة
+
+- مساحة العمل مقيدة بمجلد `workspace` داخل المشروع.
+- إنشاء الملفات يتم بوضع حصري يمنع الكتابة فوق ملف موجود.
+- إجراءات MCP وPlugins تتطلب موافقة المستخدم، لكن الشيفرات الخارجية تعمل بصلاحيات حساب Windows ولا تُعزل.
+- صفحة الذكاء الاصطناعي ومحتواها قد يحتويان على نصوص غير موثوقة؛ لا ينبغي اعتبارها تعليمات نظام.
+- تأكد من عنوان URL ومعاملات الإجراء قبل الموافقة.
+- لا تحفظ أسراراً أو بيانات اعتماد داخل مساحة العمل أو سجلات AgentOS.
+
+## هيكل المشروع
+
+- `extension/`: إضافة Firefox واللوحة الجانبية ومحولات مواقع الذكاء الاصطناعي.
+- `runtime/agentos/`: Native Host وتنفيذ الإجراءات وسياسات مساحة العمل وMCP.
+- `protocol/`: تعليمات التخطيط ومخطط JSON.
+- `config/`: إعدادات التشغيل وخوادم MCP.
+- `skills/`: تعليمات Skills.
+- `plugins/`: إضافات Python الاختيارية.
+- `workspace/`: ملفات المستخدم المحلية.
+- `logs/`: سجلات التشغيل.
+
+## حالة الإصدار
+
+الإصدار الحالي `0.2.0-rc1` مخصص للاختبار المنظم وإصلاح المشاكل قبل اعتباره إصداراً نهائياً. لا تدمج هذا الفرع في `main` قبل نجاح اختبارات Python وتجارب Firefox ومراجعة نتائجها.
