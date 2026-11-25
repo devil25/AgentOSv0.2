@@ -122,7 +122,7 @@
     // stable assistant attributes: inspect only the visible conversation region.
     const roots = unique([
       ...document.querySelectorAll('main, [role="main"], [class*="conversation" i], [class*="chat-content" i], [class*="chat-container" i]')
-    ]).filter(el => !isInsideComposer(el, composer));
+    ]).filter(el => el !== composer && !(composer && composer.contains(el)));
     const root = roots.sort((a, b) => cleanText(a).length - cleanText(b).length)[0] ||
       document.body;
 
