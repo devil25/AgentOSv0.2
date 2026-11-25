@@ -201,17 +201,8 @@ async function sendPrompt(state, prompt) {
   try {
     await api.alarms.clear("agentos-response-timeout");
     await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
-    const latest = await readProviderMessages(next.tabId);
-    if (latest.url) {
-      try {
-        const before = new URL(next.providerUrl), after = new URL(latest.url);
-        if (before.origin === after.origin && (before.pathname === "/" || before.pathname === after.pathname)) {
-          next.providerUrl = latest.url;
-          await writeTaskState(next);
-        }
-      } catch (_) {}
-    }
-    await handleAssistantSnapshot(next.tabId, latest.messages, latest.url);
+    // Do not interpret an immediate DOM read as a model response.
+    // The provider observer will deliver a stable assistant snapshot after generation.
   } catch (_) {}
 }
 function validateAction(command) {
@@ -328,7 +319,7 @@ async function processModelResponse(state, response) {
   if (approvalNeeded) return;
   await processAction(awaiting, true);
 }
-async function handleAssistantSnapshot(tabId, messages, rawUrl) {
+async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy) {
   let state = await readTaskState();
   if (!state || state.tabId !== tabId) {
     return { ok: true, accepted: true, reason: "no-task-for-tab" };
@@ -353,6 +344,12 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl) {
   }
   if (state.phase !== "awaiting_model" || await isStopped()) {
     return { ok: true, accepted: true, reason: "task-not-awaiting-model" };
+  }
+  // ChatGPT's root fallback can include the entire page (including the
+  // injected task prompt and sidebar text), not an assistant-authored turn.
+  // Never let that page-wide text falsely complete or advance an AgentOS task.
+  if (state.provider === "chatgpt" && strategy !== "semantic selectors") {
+    return { ok: true, accepted: true, reason: "unsafe-chatgpt-snapshot-strategy" };
   }
   const response = responseDelta(messages, state.baseline || []);
   if (!response) {
@@ -515,7 +512,7 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_PROVIDER_FILL") return providerRequest("AGENTOS_PROVIDER_FILL", { prompt: message.prompt });
   if (message?.type === "AGENTOS_PROVIDER_SUBMIT") return providerRequest("AGENTOS_PROVIDER_SUBMIT");
   if (message?.type === "AGENTOS_PROVIDER_SNAPSHOT" && sender.tab?.id) {
-    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url).catch(async error => {
+    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url, message.strategy).catch(async error => {
       const state = await readTaskState();
       if (state && state.tabId === sender.tab.id && state.phase === "awaiting_model") {
         await writeTaskState({ ...state, phase: "error", error: String(error.message || error) });
