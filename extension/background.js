@@ -41,13 +41,25 @@ async function setActiveTask(taskId) {
   const state = stored[TASKS_KEY]?.[taskId];
   if (state) await api.storage.local.set({ [TASK_STATE_KEY]: state, [ACTIVE_TASK_KEY]: taskId });
 }
+function chatGPTConversationIdentityMatches(state, conversationId) {
+  if (state?.provider !== "chatgpt" || typeof conversationId !== "string" || !conversationId) return false;
+  if (state.providerConversationId && state.providerConversationId === conversationId) return true;
+  // Backward compatibility: older saved tasks stored ChatGPT's temporary URL
+  // but did not persist the equivalent DOM conversation identity separately.
+  try {
+    const parsed = new URL(state.providerUrl);
+    const match = decodeURIComponent(parsed.pathname).match(/^\/c\/(local-chatgpt:.+)$/i);
+    return Boolean(match && match[1] === conversationId);
+  } catch (_) { return false; }
+}
+
 function sameConversation(a, provider, url, conversationId = null) {
   if (a?.provider !== provider) return false;
   if (a.providerUrl && url) {
     try { const oldUrl = new URL(a.providerUrl), newUrl = new URL(url); if (oldUrl.origin === newUrl.origin && oldUrl.pathname === newUrl.pathname) return true; }
     catch (_) { if (a.providerUrl === url) return true; }
   } else if (a.providerUrl === url) return true;
-  return provider === "chatgpt" && typeof a.providerConversationId === "string" && a.providerConversationId.length > 0 && conversationId === a.providerConversationId;
+  return provider === "chatgpt" && chatGPTConversationIdentityMatches(a, conversationId);
 }
 function isChatGPTContinuationUrl(provider, url) {
   if (provider !== "chatgpt" || !url) return false;
@@ -403,7 +415,7 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
   if (!state || state.tabId !== tabId) {
     return { ok: true, accepted: true, reason: "no-task-for-tab" };
   }
-  const verifiedChatGPTIdentity = state.provider === "chatgpt" && typeof state.providerConversationId === "string" && state.providerConversationId.length > 0 && conversationId === state.providerConversationId;
+  const verifiedChatGPTIdentity = chatGPTConversationIdentityMatches(state, conversationId);
   if (rawUrl && verifiedChatGPTIdentity && state.providerUrl !== rawUrl) {
     state = await writeTaskState({ ...state, providerUrl: rawUrl, conversationTransfer: { ...(state.conversationTransfer || {}), from: state.providerUrl, to: rawUrl, observedUrl: rawUrl, verifiedBy: "chatgpt-dom-conversation-id", verifiedAt: new Date().toISOString() } });
   }
@@ -471,7 +483,7 @@ async function startTask(message) {
   if (!info?.ok || !info.composerAvailable) throw new Error(info?.error || "The active tab does not have a supported AI message box.");
   const existing = await readTaskState();
   if (existing && !["completed", "cancelled", "error", "interrupted", "step_limit"].includes(existing.phase)) {
-    if (sameConversation(existing, info.provider, info.url)) {
+    if (sameConversation(existing, info.provider, info.url, info.conversationId)) {
       throw new Error("A task is already active or paused in this conversation. Resume or review it before starting another task here.");
     }
     if (["executing", "submitting_prompt"].includes(existing.phase)) {
