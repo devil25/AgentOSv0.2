@@ -1,5 +1,7 @@
 const api = globalThis.browser;
 const TASK_STATE_KEY = "agentos.taskState";
+const TASKS_KEY = "agentos.tasks";
+const ACTIVE_TASK_KEY = "agentos.activeTaskId";
 const STOP_KEY = "agentos.stopped";
 const MAX_STEPS = 40;
 const RESPONSE_TIMEOUT_MINUTES = 4;
@@ -14,15 +16,52 @@ const SUPPORTED_ACTIONS = new Set([
   "terminal.execute"
 ]);
 
-async function readTaskState() {
-  const stored = await api.storage.local.get(TASK_STATE_KEY);
+async function readTaskState(taskId) {
+  const stored = await api.storage.local.get([TASK_STATE_KEY, TASKS_KEY, ACTIVE_TASK_KEY]);
+  const tasks = stored[TASKS_KEY] || {};
+  if (taskId && tasks[taskId]) return tasks[taskId];
+  if (!taskId && stored[ACTIVE_TASK_KEY] && tasks[stored[ACTIVE_TASK_KEY]]) return tasks[stored[ACTIVE_TASK_KEY]];
   return stored[TASK_STATE_KEY] || null;
 }
 async function writeTaskState(state) {
-  const next = { ...state, updatedAt: new Date().toISOString() };
-  await api.storage.local.set({ [TASK_STATE_KEY]: next });
-  try { await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_UPDATED", state: next }); } catch (_) {}
+  const stored = await api.storage.local.get([TASKS_KEY, ACTIVE_TASK_KEY]);
+  const tasks = stored[TASKS_KEY] && typeof stored[TASKS_KEY] === "object" ? stored[TASKS_KEY] : {};
+  const id = state.id || stored[ACTIVE_TASK_KEY] || ("task-" + Date.now());
+  const next = { ...state, id, updatedAt: new Date().toISOString() };
+  tasks[id] = next;
+  await api.storage.local.set({ [TASK_STATE_KEY]: next, [TASKS_KEY]: tasks, [ACTIVE_TASK_KEY]: id });
+  try { await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_UPDATED", taskId: id, state: next }); } catch (_) {}
   return next;
+}
+async function setActiveTask(taskId) {
+  const stored = await api.storage.local.get(TASKS_KEY);
+  const state = stored[TASKS_KEY]?.[taskId];
+  if (state) await api.storage.local.set({ [TASK_STATE_KEY]: state, [ACTIVE_TASK_KEY]: taskId });
+}
+function sameConversation(a, provider, url) {
+  try {
+    const oldUrl = new URL(a.providerUrl), newUrl = new URL(url);
+    return a.provider === provider && oldUrl.origin === newUrl.origin && oldUrl.pathname === newUrl.pathname;
+  } catch (_) { return a.provider === provider && a.providerUrl === url; }
+}
+async function taskStateForActiveTab() {
+  const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    try {
+      const info = await tabRequest(tab.id, "AGENTOS_PROVIDER_INSPECT");
+      if (info?.ok) {
+        const stored = await api.storage.local.get(TASKS_KEY);
+        const matches = Object.values(stored[TASKS_KEY] || {})
+          .filter(state => state.provider === info.provider && sameConversation(state, info.provider, info.url))
+          .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+        if (matches.length) {
+          await setActiveTask(matches[0].id);
+          return matches[0];
+        }
+      }
+    } catch (_) {}
+  }
+  return readTaskState();
 }
 async function isStopped() {
   const stored = await api.storage.local.get(STOP_KEY);
@@ -68,7 +107,10 @@ async function tabRequest(tabId, type, extra = {}) {
 async function readProviderMessages(tabId) {
   const result = await tabRequest(tabId, "AGENTOS_PROVIDER_READ");
   if (!result?.ok) throw new Error(result?.error || "Could not read the AI website response.");
-  return (result.messages || []).filter(x => typeof x === "string" && x.trim());
+  return {
+    messages: (result.messages || []).filter(x => typeof x === "string" && x.trim()),
+    url: result.url || null
+  };
 }
 function responseDelta(messages, baseline) {
   if (!Array.isArray(messages) || !Array.isArray(baseline)) return "";
@@ -80,18 +122,26 @@ function responseDelta(messages, baseline) {
 }
 async function sendPrompt(state, prompt) {
   if (await isStopped()) return;
-  const baseline = await readProviderMessages(state.tabId);
+  const snapshot = await readProviderMessages(state.tabId);
+  const baseline = snapshot.messages;
   const submitting = await writeTaskState({
     ...state, phase: "submitting_prompt", prompt, baseline,
+    providerUrl: snapshot.url || state.providerUrl,
     response: null, action: null, error: null
   });
   await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_FILL", { prompt });
   await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_SUBMIT");
-  const next = await writeTaskState({ ...submitting, phase: "awaiting_model" });
+  let providerUrl = submitting.providerUrl;
+  try {
+    const info = await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_INSPECT");
+    if (info?.ok && info.url) providerUrl = info.url;
+  } catch (_) {}
+  const next = await writeTaskState({ ...submitting, phase: "awaiting_model", providerUrl });
   try {
     await api.alarms.clear("agentos-response-timeout");
     await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
-    await handleAssistantSnapshot(next.tabId, await readProviderMessages(next.tabId));
+    const latest = await readProviderMessages(next.tabId);
+    await handleAssistantSnapshot(next.tabId, latest.messages, latest.url);
   } catch (_) {}
 }
 function validateAction(command) {
@@ -200,33 +250,44 @@ async function processModelResponse(state, response) {
   if (approvalNeeded) return;
   await processAction(awaiting, true);
 }
-async function handleAssistantSnapshot(tabId, messages) {
+async function handleAssistantSnapshot(tabId, messages, rawUrl) {
   const state = await readTaskState();
   if (!state || state.phase !== "awaiting_model" || state.tabId !== tabId || await isStopped()) return;
+  if (rawUrl && !sameConversation(state, state.provider, rawUrl)) return;
   const response = responseDelta(messages, state.baseline || []);
   if (!response) return;
   await api.alarms.clear("agentos-response-timeout");
   return processModelResponse(state, response);
 }
 async function startTask(message) {
-  const existing = await readTaskState();
-  if (existing && !["completed", "cancelled", "error", "interrupted", "step_limit"].includes(existing.phase)) {
-    throw new Error("A task is already active or paused. Resume or review it before starting another task.");
-  }
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("Open a supported AI website tab first.");
   const info = await tabRequest(tab.id, "AGENTOS_PROVIDER_INSPECT");
   if (!info?.ok || !info.composerAvailable) throw new Error(info?.error || "The active tab does not have a supported AI message box.");
+  const existing = await readTaskState();
+  if (existing && !["completed", "cancelled", "error", "interrupted", "step_limit"].includes(existing.phase)) {
+    if (sameConversation(existing, info.provider, info.url)) {
+      throw new Error("A task is already active or paused in this conversation. Resume or review it before starting another task here.");
+    }
+    if (["executing", "submitting_prompt"].includes(existing.phase)) {
+      throw new Error("The previous task is in a critical execution step. Wait for it to finish before switching to another task.");
+    }
+    if (["awaiting_model", "awaiting_approval", "action_completed"].includes(existing.phase)) {
+      await writeTaskState({ ...existing, phase: "paused", resumePhase: existing.phase, error: "Paused automatically because you switched to another AI conversation. Return to the original conversation and resume this task." });
+    }
+  }
   await setStopped(false);
+  const id = "task-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
   const state = {
-    task: message.task, autonomy: message.autonomy === "autonomous" ? "autonomous" : "supervised",
+    id, task: message.task, autonomy: message.autonomy === "autonomous" ? "autonomous" : "supervised",
     tabId: tab.id, provider: info.provider, providerUrl: info.url,
     steps: 0, phase: "starting", startedAt: new Date().toISOString()
   };
+  await setActiveTask(id);
   const prompt = message.prompt;
   await writeTaskState(state);
   await sendPrompt(state, prompt);
-  return { ok: true, state: await readTaskState() };
+  return { ok: true, state: await readTaskState(id) };
 }
 async function reattachTaskTab(state) {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
@@ -247,8 +308,9 @@ async function reattachTaskTab(state) {
   }
   return { ...state, tabId: tab.id };
 }
-async function resumeTask() {
-  const state = await readTaskState();
+async function resumeTask(taskId) {
+  const state = await readTaskState(taskId);
+  if (state?.id) await setActiveTask(state.id);
   if (!state) throw new Error("There is no saved task.");
   await setStopped(false);
   if (state.phase === "response_ready" && state.response) {
@@ -258,7 +320,8 @@ async function resumeTask() {
     const resumed = await writeTaskState({ ...attached, phase: "awaiting_model", resumePhase: null });
     try {
       await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
-      await handleAssistantSnapshot(resumed.tabId, await readProviderMessages(resumed.tabId));
+      const snapshot = await readProviderMessages(resumed.tabId);
+      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url);
     } catch (_) {}
   } else if (state.phase === "paused" && state.resumePhase === "awaiting_approval") {
     const attached = await reattachTaskTab(state);
@@ -277,7 +340,8 @@ async function resumeTask() {
   } else if (state.phase === "awaiting_model") {
     try {
       await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
-      await handleAssistantSnapshot(state.tabId, await readProviderMessages(state.tabId));
+      const snapshot = await readProviderMessages(state.tabId);
+      await handleAssistantSnapshot(state.tabId, snapshot.messages, snapshot.url);
     } catch (_) {}
   } else if (state.phase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "The browser stopped during an action. Its outcome is unknown; it was not replayed." });
@@ -313,10 +377,10 @@ api.action.onClicked.addListener(async () => {
 });
 api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_NATIVE_REQUEST") return nativeRequest(message.payload);
-  if (message?.type === "AGENTOS_TASK_STATE_GET") return readTaskState().then(state => ({ ok: true, state }));
+  if (message?.type === "AGENTOS_TASK_STATE_GET") return taskStateForActiveTab().then(state => ({ ok: true, state }));
   if (message?.type === "AGENTOS_TASK_STATE_SET") return writeTaskState(message.state).then(state => ({ ok: true, state }));
   if (message?.type === "AGENTOS_TASK_START") return startTask(message);
-  if (message?.type === "AGENTOS_TASK_RESUME") return resumeTask();
+  if (message?.type === "AGENTOS_TASK_RESUME") return resumeTask(message.taskId);
   if (message?.type === "AGENTOS_TASK_APPROVAL") return readTaskState().then(async state => {
     if (!state || state.phase !== "awaiting_approval" || !state.action) return { ok: false, error: "No action is waiting for approval." };
     await processAction(state, Boolean(message.approved));
@@ -336,7 +400,7 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_PROVIDER_FILL") return providerRequest("AGENTOS_PROVIDER_FILL", { prompt: message.prompt });
   if (message?.type === "AGENTOS_PROVIDER_SUBMIT") return providerRequest("AGENTOS_PROVIDER_SUBMIT");
   if (message?.type === "AGENTOS_PROVIDER_SNAPSHOT" && sender.tab?.id) {
-    return handleAssistantSnapshot(sender.tab.id, message.messages).catch(async error => {
+    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url).catch(async error => {
       const state = await readTaskState();
       if (state && state.tabId === sender.tab.id && state.phase === "awaiting_model") {
         await writeTaskState({ ...state, phase: "error", error: String(error.message || error) });
