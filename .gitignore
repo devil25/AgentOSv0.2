@@ -1,22 +1,30 @@
-@"
+# Python
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Build artifacts
 build/
 dist/
+*.spec.bak
+
+# Secrets and local configuration
 .env
 .env.*
 !.env.example
 *.key
 *.pem
+config/mcp_servers.json
+runtime/com.agentos.host.json
+
+# IDE and OS files
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-config/mcp_servers.json
-runtime/com.agentos.host.json
-"@ | Set-Content -Encoding UTF8 .gitignore
-# Local logs and backups
+
+# Runtime data and backups
 logs/
+*.log
 *.bak
 New Text Document.txt
