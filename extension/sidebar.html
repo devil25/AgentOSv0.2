@@ -35,11 +35,11 @@
           <option value="autonomous">Autonomous · execute project actions automatically</option>
           <option value="supervised" selected>Supervised · approve every action</option>
         </select>
-        <p class="muted hint">Autonomous mode runs supported project tools without per-step approval. Supervised mode pauses for your approval before each action.</p>
+        <p class="muted hint">Autonomous mode runs supported project tools without per-step approval. Supervised mode pauses for your approval before each action. Terminal commands use your Windows account permissions; the project working directory is not an OS sandbox.</p>
       </div>
       <div class="card">
         <div class="eyebrow">TASK</div>
-        <p class="muted hint">Send one task. AgentOS will monitor the model response, execute approved actions, return real results to the same conversation, and continue automatically.</p>
+        <p class="muted hint">Send one task. The background agent monitors new model replies, executes permitted actions, returns results to the same conversation, and continues automatically. You can close this sidebar while it works; keep the AI conversation tab open.</p>
         <textarea id="taskInput" placeholder="Describe what you want AgentOS to do…"></textarea>
         <button id="sendTaskBtn" class="btn primary full">Send task to active AI website</button>
         <button id="resumeTaskBtn" class="btn secondary full" hidden>Resume saved task</button>
