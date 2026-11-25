@@ -187,7 +187,13 @@
 
   function getChatGPTConversationId() {
     if (provider?.id !== "chatgpt") return null;
-    const values = [...document.querySelectorAll(CHATGPT_CONVERSATION_ID_SELECTOR)].map(node => node.getAttribute("data-chatgpt-selection-conversation-id"));
+    // ChatGPT may keep a hidden stale conversation shell in the DOM while
+    // rendering the active conversation. Only visible, connected elements
+    // may contribute an identity; conflicting visible identities still fail
+    // closed in resolveChatGPTConversationId().
+    const values = [...document.querySelectorAll(CHATGPT_CONVERSATION_ID_SELECTOR)]
+      .filter(visible)
+      .map(node => node.getAttribute("data-chatgpt-selection-conversation-id"));
     return resolveChatGPTConversationId(values);
   }
 
