@@ -5,7 +5,9 @@ const {
   CHATGPT_RESPONSE_BODY_SELECTOR,
   CHATGPT_MESSAGE_OWNER_SELECTOR,
   CHATGPT_MESSAGE_SOURCE_SELECTOR,
-  resolveChatGPTMessageId
+  CHATGPT_CONVERSATION_ID_SELECTOR,
+  resolveChatGPTMessageId,
+  resolveChatGPTConversationId
 } = require("../provider-adapters.js");
 
 test("recognizes current ChatGPT app-shell assistant ownership markers", () => {
@@ -52,4 +54,12 @@ test("accepts a ChatGPT message only when its boundary, owner and source IDs agr
   assert.equal(resolveChatGPTMessageId(id, id, ""), id);
   assert.equal(resolveChatGPTMessageId(id, "different-message", id), null);
   assert.equal(resolveChatGPTMessageId("", "", ""), null);
+});
+
+
+test("uses a unique ChatGPT DOM conversation identity across URL changes", () => {
+  assert.equal(CHATGPT_CONVERSATION_ID_SELECTOR, "[data-chatgpt-selection-conversation-id]");
+  assert.equal(resolveChatGPTConversationId(["local-chatgpt:abc", "local-chatgpt:abc"]), "local-chatgpt:abc");
+  assert.equal(resolveChatGPTConversationId(["local-chatgpt:abc", "local-chatgpt:other"]), null);
+  assert.equal(resolveChatGPTConversationId([]), null);
 });
