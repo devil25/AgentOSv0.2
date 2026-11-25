@@ -44,24 +44,52 @@ function sameConversation(a, provider, url) {
     return a.provider === provider && oldUrl.origin === newUrl.origin && oldUrl.pathname === newUrl.pathname;
   } catch (_) { return a.provider === provider && a.providerUrl === url; }
 }
+function isChatGPTContinuationUrl(provider, url) {
+  if (provider !== "chatgpt" || !url) return false;
+  try {
+    const parsed = new URL(url);
+    const path = decodeURIComponent(parsed.pathname);
+    return ["chatgpt.com", "chat.openai.com"].includes(parsed.hostname) &&
+      /^\/c\/local-chatgpt:/i.test(path);
+  } catch (_) { return false; }
+}
 async function taskStateForActiveTab() {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id) {
-    try {
-      const info = await tabRequest(tab.id, "AGENTOS_PROVIDER_INSPECT");
-      if (info?.ok) {
-        const stored = await api.storage.local.get(TASKS_KEY);
-        const matches = Object.values(stored[TASKS_KEY] || {})
-          .filter(state => state.provider === info.provider && sameConversation(state, info.provider, info.url))
-          .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-        if (matches.length) {
-          await setActiveTask(matches[0].id);
-          return matches[0];
+  if (!tab?.id) return null;
+  try {
+    const info = await tabRequest(tab.id, "AGENTOS_PROVIDER_INSPECT");
+    if (!info?.ok) return null;
+    const stored = await api.storage.local.get(TASKS_KEY);
+    const tasks = Object.values(stored[TASKS_KEY] || {});
+    const matches = tasks
+      .filter(state => state.provider === info.provider && sameConversation(state, info.provider, info.url))
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    if (matches.length) {
+      await setActiveTask(matches[0].id);
+      return matches[0];
+    }
+
+    // ChatGPT can move a just-continued conversation to a local-chatgpt URL.
+    // Adopt that URL only for the same tab/provider while awaiting the model.
+    const active = await readTaskState();
+    if (active && active.tabId === tab.id && active.provider === info.provider &&
+        active.phase === "awaiting_model" &&
+        isChatGPTContinuationUrl(info.provider, info.url)) {
+      const migrated = await writeTaskState({
+        ...active,
+        providerUrl: info.url,
+        conversationTransfer: {
+          from: active.providerUrl,
+          to: info.url,
+          at: new Date().toISOString()
         }
-      }
-    } catch (_) {}
+      });
+      return migrated;
+    }
+    return null;
+  } catch (_) {
+    return null;
   }
-  return readTaskState();
 }
 async function isStopped() {
   const stored = await api.storage.local.get(STOP_KEY);
@@ -276,12 +304,24 @@ async function processModelResponse(state, response) {
   await processAction(awaiting, true);
 }
 async function handleAssistantSnapshot(tabId, messages, rawUrl) {
-  const state = await readTaskState();
+  let state = await readTaskState();
   if (!state || state.tabId !== tabId) {
     return { ok: true, accepted: true, reason: "no-task-for-tab" };
   }
   if (rawUrl && !sameConversation(state, state.provider, rawUrl)) {
-    return { ok: true, accepted: true, reason: "different-conversation" };
+    if (state.phase === "awaiting_model" && isChatGPTContinuationUrl(state.provider, rawUrl)) {
+      state = await writeTaskState({
+        ...state,
+        providerUrl: rawUrl,
+        conversationTransfer: {
+          from: state.providerUrl,
+          to: rawUrl,
+          at: new Date().toISOString()
+        }
+      });
+    } else {
+      return { ok: true, accepted: true, reason: "different-conversation" };
+    }
   }
   if (["starting", "submitting_prompt"].includes(state.phase)) {
     return { ok: true, accepted: false, reason: "task-transitioning" };
