@@ -74,7 +74,9 @@ async function taskStateForActiveTab() {
     const active = await readTaskState();
     if (active && active.tabId === tab.id && active.provider === info.provider &&
         active.phase === "awaiting_model" &&
-        isChatGPTContinuationUrl(info.provider, info.url)) {
+        (isChatGPTContinuationUrl(info.provider, info.url) ||
+          (info.provider === "chatgpt" && info.continuationMarker === true &&
+            active.conversationTransfer?.to === active.providerUrl))) {
       const migrated = await writeTaskState({
         ...active,
         providerUrl: info.url,
@@ -146,7 +148,8 @@ async function readProviderMessages(tabId) {
   return {
     messages: (result.messages || []).filter(x => typeof x === "string" && x.trim()),
     url: result.url || null,
-    strategy: result.strategy || null
+    strategy: result.strategy || null,
+    continuationMarker: result.continuationMarker === true
   };
 }
 function responseDelta(messages, baseline) {
@@ -320,20 +323,29 @@ async function processModelResponse(state, response) {
   if (approvalNeeded) return;
   await processAction(awaiting, true);
 }
-async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy) {
+async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, continuationMarker = false) {
   let state = await readTaskState();
   if (!state || state.tabId !== tabId) {
     return { ok: true, accepted: true, reason: "no-task-for-tab" };
   }
   if (rawUrl && !sameConversation(state, state.provider, rawUrl)) {
-    if (state.phase === "awaiting_model" && isChatGPTContinuationUrl(state.provider, rawUrl)) {
+    const verifiedChatGPTContinuation =
+      state.phase === "awaiting_model" &&
+      state.provider === "chatgpt" &&
+      continuationMarker === true &&
+      state.conversationTransfer?.to === state.providerUrl;
+    if (state.phase === "awaiting_model" &&
+        (isChatGPTContinuationUrl(state.provider, rawUrl) || verifiedChatGPTContinuation)) {
       state = await writeTaskState({
         ...state,
         providerUrl: rawUrl,
         conversationTransfer: {
-          from: state.providerUrl,
-          to: rawUrl,
-          at: new Date().toISOString()
+          ...(state.conversationTransfer || {}),
+          from: state.conversationTransfer?.from || state.providerUrl,
+          to: state.conversationTransfer?.to || rawUrl,
+          observedUrl: rawUrl,
+          verifiedBy: verifiedChatGPTContinuation ? "chatgpt-continued-from-marker" : "local-chatgpt-url",
+          verifiedAt: new Date().toISOString()
         }
       });
     } else {
@@ -422,7 +434,7 @@ async function resumeTask(taskId) {
     try {
       await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
       const snapshot = await readProviderMessages(resumed.tabId);
-      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url, snapshot.strategy);
+      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url, snapshot.strategy, snapshot.continuationMarker);
     } catch (_) {}
   } else if (state.phase === "paused" && state.resumePhase === "awaiting_approval") {
     const attached = await reattachTaskTab(state);
@@ -513,7 +525,7 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_PROVIDER_FILL") return providerRequest("AGENTOS_PROVIDER_FILL", { prompt: message.prompt });
   if (message?.type === "AGENTOS_PROVIDER_SUBMIT") return providerRequest("AGENTOS_PROVIDER_SUBMIT");
   if (message?.type === "AGENTOS_PROVIDER_SNAPSHOT" && sender.tab?.id) {
-    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url, message.strategy).catch(async error => {
+    return handleAssistantSnapshot(sender.tab.id, message.messages, message.url, message.strategy, message.continuationMarker === true).catch(async error => {
       const state = await readTaskState();
       if (state && state.tabId === sender.tab.id && state.phase === "awaiting_model") {
         await writeTaskState({ ...state, phase: "error", error: String(error.message || error) });
