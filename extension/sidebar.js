@@ -106,11 +106,14 @@ async function sendTask() {
   if (!task) { out("Write a task first."); return; }
   $("sendTaskBtn").disabled = true;
   try {
+    const workspace = await native({ type: "workspace.get" });
+    if (!workspace?.ok) throw new Error(workspace?.error || "Could not read the selected workspace folder.");
+    $("workspacePath").textContent = workspace.path;
     const result = await api.runtime.sendMessage({
       type: "AGENTOS_TASK_START",
       task,
       autonomy: $("autonomySelect").value,
-      prompt: AGENTOS_INSTRUCTIONS + "\n\nAGENTOS WORKSPACE:\n" + (($("workspacePath").textContent || "").trim()) + "\nAll workspace tool paths are relative to this selected directory.\n\nUSER TASK:\n" + task
+      prompt: AGENTOS_INSTRUCTIONS + "\n\nAGENTOS WORKSPACE:\n" + workspace.path + "\nAll workspace tool paths are relative to this selected directory.\n\nUSER TASK:\n" + task
     });
     if (!result?.ok) throw new Error(result?.error || "Could not start the task.");
     renderTaskState(result.state);
