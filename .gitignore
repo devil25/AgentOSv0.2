@@ -15,6 +15,7 @@ dist/
 *.key
 *.pem
 config/mcp_servers.json
+config/workspace.json
 runtime/com.agentos.host.json
 
 # IDE and OS files
