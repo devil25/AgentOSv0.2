@@ -1,8 +1,11 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0-dev",
   "workspace_only": true,
   "max_file_read_bytes": 1048576,
   "max_file_write_chars": 200000,
   "terminal_enabled": false,
-  "autonomous_mode": "bounded"
+  "autonomous_mode": "hybrid",
+  "ai_source": "web",
+  "default_provider": "zai",
+  "require_confirmation_for": ["workspace.create_file", "mcp.call", "plugins.call", "browser.submit_prompt"]
 }
