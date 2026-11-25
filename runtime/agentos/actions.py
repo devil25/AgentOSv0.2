@@ -1,4 +1,6 @@
 import re
+import os
+import subprocess
 from .paths import safe_workspace_path, WORKSPACE, SKILLS
 from .catalog import list_skills, list_plugins, list_mcp
 from .audit import audit
@@ -19,6 +21,7 @@ SUPPORTED_ACTIONS = {
     "workspace.list",
     "workspace.read_file",
     "workspace.create_file",
+    "terminal.execute",
 }
 
 
@@ -55,7 +58,7 @@ def execute(action, args):
             "runtime": "online",
             "ai_source": "web",
             "autonomy": "hybrid",
-            "terminal_enabled": False,
+            "terminal_enabled": True,
         }
 
     if action == "skills.list":
@@ -122,6 +125,39 @@ def execute(action, args):
             "ok": True,
             "path": _workspace_relative(p),
             "content": p.read_text(encoding="utf-8", errors="replace"),
+        }
+
+    if action == "terminal.execute":
+        command = _required_text(args, "command", 12000)
+        timeout = args.get("timeout_seconds", 120)
+        if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 180:
+            raise ValueError("'timeout_seconds' must be an integer from 1 to 180")
+        # Commands run with the project workspace as their working directory.
+        # The process still inherits the Windows user's OS permissions; this is
+        # a working-directory boundary, not an operating-system sandbox.
+        if os.name == "nt":
+            argv = ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command]
+        else:
+            argv = ["/bin/bash", "-lc", command]
+        completed = subprocess.run(
+            argv,
+            cwd=str(WORKSPACE.resolve()),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            shell=False,
+        )
+        stdout = completed.stdout[-60000:]
+        stderr = completed.stderr[-60000:]
+        return {
+            "ok": completed.returncode == 0,
+            "returncode": completed.returncode,
+            "cwd": str(WORKSPACE.resolve()),
+            "stdout": stdout,
+            "stderr": stderr,
+            "command": command,
         }
 
     if action == "workspace.create_file":
