@@ -224,6 +224,11 @@ async function executeAction(command) {
   return nativeRequest({ type: "action.execute", action: command.action, arguments: command.arguments });
 }
 async function processAction(state, approved) {
+  // Hard execution boundary: supervised actions require a persisted user approval.
+  // This guard protects against accidental direct calls and response-processing races.
+  if (approved && state.autonomy !== "autonomous" && state.approvalGranted !== true) {
+    return { ok: false, error: "Supervised action blocked: explicit user approval is required." };
+  }
   if (!approved) {
     const rejected = { ok: false, rejected: true, action: state.action.action, reason: "User rejected this action." };
     const prompt = continuePrompt(state, rejected);
@@ -240,7 +245,7 @@ async function processAction(state, approved) {
   const prompt = continuePrompt(state, lastResult);
   const completed = await writeTaskState({
     ...state, phase: "action_completed", steps, lastResult,
-    prompt, action: null, response: null
+    prompt, action: null, response: null, approvalGranted: false
   });
   if (steps >= MAX_STEPS) {
     await writeTaskState({ ...completed, phase: "step_limit" });
@@ -261,7 +266,12 @@ async function processModelResponse(state, response) {
     return;
   }
   const approvalNeeded = ready.autonomy !== "autonomous" || !AUTONOMOUS_ACTIONS.has(action.action);
-  const awaiting = await writeTaskState({ ...ready, phase: approvalNeeded ? "awaiting_approval" : "executing", action });
+  const awaiting = await writeTaskState({
+    ...ready,
+    phase: approvalNeeded ? "awaiting_approval" : "executing",
+    action,
+    approvalGranted: false
+  });
   if (approvalNeeded) return;
   await processAction(awaiting, true);
 }
@@ -418,7 +428,12 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_TASK_RESUME") return resumeTask(message.taskId);
   if (message?.type === "AGENTOS_TASK_APPROVAL") return readTaskState().then(async state => {
     if (!state || state.phase !== "awaiting_approval" || !state.action) return { ok: false, error: "No action is waiting for approval." };
-    await processAction(state, Boolean(message.approved));
+    const approved = Boolean(message.approved);
+    // Persist the user's explicit decision before entering the execution path.
+    const decided = approved
+      ? await writeTaskState({ ...state, approvalGranted: true })
+      : state;
+    await processAction(decided, approved);
     return { ok: true };
   });
   if (message?.type === "AGENTOS_TASK_STOP") return setStopped(true).then(async () => {
