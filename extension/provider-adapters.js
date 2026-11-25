@@ -285,16 +285,24 @@
         queueAssistantSnapshot();
         return;
       }
-      lastObservedSignature = signature;
       try {
-        await api.runtime.sendMessage({
+        const acknowledgement = await api.runtime.sendMessage({
           type: "AGENTOS_PROVIDER_SNAPSHOT",
           messages: snapshot.messages,
           url: snapshot.url || location.href,
           provider: provider?.id || "unknown",
           strategy: snapshot.strategy
         });
-      } catch (_) {}
+        // Only consume this snapshot after the background confirms acceptance.
+        if (acknowledgement?.accepted) {
+          lastObservedSignature = signature;
+        } else {
+          observerTimer = setTimeout(queueAssistantSnapshot, 1200);
+        }
+      } catch (error) {
+        console.warn("[AgentOS] Assistant response delivery failed; retrying.", error);
+        observerTimer = setTimeout(queueAssistantSnapshot, 1200);
+      }
     }, 1500);
   }
   const conversationObserver = new MutationObserver(queueAssistantSnapshot);
