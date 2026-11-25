@@ -15,6 +15,34 @@
     "chat.deepseek.com": { id: "deepseek", name: "DeepSeek" }
   };
 
+  // ChatGPT's current app-shell renderer uses explicit assistant ownership
+  // markers that are not covered by the legacy message-author selectors.
+  // Keep this list role-specific: generic ".markdown" nodes may belong to user
+  // content and must never authorize an AgentOS action.
+  const CHATGPT_ASSISTANT_SELECTORS = Object.freeze([
+    '[data-message-author-role="assistant"]',
+    '[data-role="assistant"]',
+    '[data-author="assistant"]',
+    '[data-message-role="assistant"]',
+    '[data-author-role="assistant"]',
+    '[data-turn-role="assistant"]',
+    '[data-message-author="assistant"]',
+    '[data-conversation-role="assistant"]',
+    '[data-turn="assistant"]',
+    '[data-testid^="conversation-turn-"][data-turn="assistant"]',
+    '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
+    'section[data-turn="assistant"]',
+    '[data-chatgpt-search-unit-key$=":assistant"]',
+    '[data-content-search-unit-key$=":assistant"]',
+    '[data-markdown-text-style="assistant-message"]',
+  ]);
+
+  // Export the selector contract for Node tests without executing browser code.
+  if (typeof module !== "undefined" && module.exports && typeof document === "undefined") {
+    module.exports = Object.freeze({ CHATGPT_ASSISTANT_SELECTORS });
+    return;
+  }
+
   const host = location.hostname;
   const provider = PROVIDERS[host] || Object.entries(PROVIDERS)
     .find(([domain]) => host.endsWith("." + domain))?.[1] || null;
@@ -107,7 +135,7 @@
   function readAssistantResponse() {
     const composer = findComposer();
     const continuationMarker = hasChatGPTContinuationMarker();
-    const semanticSelectors = [
+    const genericSemanticSelectors = [
       '[data-message-author-role="assistant"]',
       '[data-role="assistant"]',
       '[data-author="assistant"]',
@@ -128,6 +156,9 @@
       ".ds-markdown",
       '[class*="response-container" i]'
     ];
+    const semanticSelectors = provider?.id === "chatgpt"
+      ? CHATGPT_ASSISTANT_SELECTORS
+      : genericSemanticSelectors;
 
     const semantic = compactCandidates(
       semanticSelectors.flatMap(selector => {
