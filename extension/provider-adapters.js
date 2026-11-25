@@ -251,7 +251,7 @@
         button.innerText, button.getAttribute("aria-label"),
         button.getAttribute("data-testid"), button.title
       ].join(" ").toLowerCase();
-      return /stop generating|stop response|cancel response|إيقاف التوليد/.test(label);
+      return /stop generating|stop response|cancel response|\\bstop\\b|إيقاف التوليد/.test(label);
     });
   }
   function queueAssistantSnapshot() {
