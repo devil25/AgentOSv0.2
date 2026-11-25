@@ -63,7 +63,7 @@ class ActionTests(unittest.TestCase):
 
     def test_terminal_execute_blocks_host_level_destructive_commands(self):
         with self.assertRaisesRegex(ValueError, "Blocked host-level"):
-            execute("terminal.execute", {"command": "Remove-Item C:\\Windows\\System32 -Recurse -Force"})
+            execute("terminal.execute", {"command": "format C:"})
 
     def test_terminal_execute_rejects_invalid_timeout(self):
         with self.assertRaises(ValueError):
