@@ -28,8 +28,8 @@ function renderTaskState(state) {
   if (!state) return;
   logState(state.phase);
   $("resumeTaskBtn").hidden = ![
-    "awaiting_model", "response_ready", "awaiting_approval",
-    "action_completed", "paused"
+    "submitting_prompt", "awaiting_model", "response_ready", "awaiting_approval",
+    "executing", "action_completed", "paused"
   ].includes(state.phase);
   $("approvalCard").hidden = state.phase !== "awaiting_approval" || !state.action;
   if (state.action) {
