@@ -237,6 +237,55 @@
     return { ok: true, submitted: true, method: "enter-key-fallback" };
   }
 
+  // Observe the provider page independently of the sidebar lifetime. A quiet,
+  // stable assistant response is forwarded to the background task controller.
+  let observerTimer = null;
+  let lastObservedSignature = "";
+  let stableSignature = "";
+  let stableCount = 0;
+  function generationInProgress() {
+    const controls = [...document.querySelectorAll("button")];
+    return controls.some(button => {
+      if (!visible(button)) return false;
+      const label = [
+        button.innerText, button.getAttribute("aria-label"),
+        button.getAttribute("data-testid"), button.title
+      ].join(" ").toLowerCase();
+      return /stop generating|stop response|cancel response|إيقاف التوليد/.test(label);
+    });
+  }
+  function queueAssistantSnapshot() {
+    if (observerTimer) clearTimeout(observerTimer);
+    observerTimer = setTimeout(async () => {
+      const snapshot = readAssistantResponse();
+      if (!snapshot.ok || !snapshot.messages.length) return;
+      const signature = JSON.stringify(snapshot.messages);
+      if (signature === lastObservedSignature) return;
+      if (signature === stableSignature) stableCount += 1;
+      else { stableSignature = signature; stableCount = 0; }
+      if (generationInProgress() || stableCount < 1) {
+        queueAssistantSnapshot();
+        return;
+      }
+      lastObservedSignature = signature;
+      try {
+        await api.runtime.sendMessage({
+          type: "AGENTOS_PROVIDER_SNAPSHOT",
+          messages: snapshot.messages,
+          strategy: snapshot.strategy
+        });
+      } catch (_) {}
+    }, 1500);
+  }
+  const conversationObserver = new MutationObserver(queueAssistantSnapshot);
+  const beginObserving = () => {
+    if (!document.body || document.documentElement.dataset.agentosObserver === "active") return;
+    document.documentElement.dataset.agentosObserver = "active";
+    conversationObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+  };
+  if (document.body) beginObserving();
+  else document.addEventListener("DOMContentLoaded", beginObserving, { once: true });
+
   globalThis.AgentOSProvider = {
     inspect, fillPrompt, submitPrompt, readAssistantMessages, readAssistantResponse
   };
