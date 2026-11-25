@@ -318,7 +318,7 @@ async function refreshStopState() {
 $("connectBtn").addEventListener("click", testRuntime);
 $("providerCheckBtn").addEventListener("click", providerCheck);
 $("sendTaskBtn").addEventListener("click", sendTask);
-$("resumeTaskBtn").addEventListener("click", resumeTask);\n$("resumeTaskBtn").addEventListener("click", resumeTask);
+$("resumeTaskBtn").addEventListener("click", resumeTask);
 $("readResponseBtn").addEventListener("click", async () => {
   try { out((await readMessages()).join("\n\n")); } catch (error) { out(String(error)); }
 });
