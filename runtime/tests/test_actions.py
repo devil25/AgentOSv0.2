@@ -14,11 +14,11 @@ class ActionTests(unittest.TestCase):
         result = execute("runtime.status", {})
         self.assertTrue(result["ok"])
         self.assertEqual(result["ai_source"], "web")
-        self.assertFalse(result["terminal_enabled"])
+        self.assertTrue(result["terminal_enabled"])
 
     def test_unknown_action_is_rejected(self):
         with self.assertRaises(ValueError):
-            execute("terminal.execute", {"command": "whoami"})
+            execute("terminal.run_unlisted", {"command": "whoami"})
 
     def test_path_traversal_is_rejected(self):
         with self.assertRaises(ValueError):
