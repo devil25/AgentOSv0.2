@@ -6,7 +6,9 @@
     "chatgpt.com": { id: "chatgpt", name: "ChatGPT" },
     "chat.openai.com": { id: "chatgpt", name: "ChatGPT" },
     "claude.ai": { id: "claude", name: "Claude" },
-    "gemini.google.com": { id: "gemini", name: "Gemini" }
+    "gemini.google.com": { id: "gemini", name: "Gemini" },
+    "aistudio.google.com": { id: "google-ai-studio", name: "Google AI Studio" },
+    "chat.deepseek.com": { id: "deepseek", name: "DeepSeek" }
   };
 
   const host = location.hostname;
@@ -24,7 +26,14 @@
   const unique = (items) => [...new Set(items)].filter(visible);
 
   function findComposer() {
+    const providerSelectors = {
+      chatgpt: ["#prompt-textarea", '[data-testid="prompt-textarea"]'],
+      gemini: ['rich-textarea [contenteditable="true"]', '[aria-label*="Enter a prompt" i]'],
+      "google-ai-studio": ["ms-prompt-input textarea", "ms-prompt-input [contenteditable='true']", ".ql-editor", "textarea"],
+      deepseek: ['textarea[placeholder*="Message" i]', '[contenteditable="true"][data-placeholder]', "textarea"]
+    };
     const selectors = [
+      ...(providerSelectors[provider?.id] || []),
       "textarea",
       '[contenteditable="true"][role="textbox"]',
       '[contenteditable="true"]',
@@ -98,7 +107,12 @@
       '[class*="markdown" i]',
       '[class*="prose" i]',
       '[class*="response-content" i]',
-      '[class*="answer-content" i]'
+      '[class*="answer-content" i]',
+      "model-response",
+      "ms-chat-turn",
+      ".turn-content",
+      ".ds-markdown",
+      '[class*="response-container" i]'
     ];
 
     const semantic = compactCandidates(
@@ -114,7 +128,8 @@
         ok: true,
         messages: semantic.slice(-12).map(x => x.text),
         strategy: "semantic selectors",
-        candidates: semantic.length
+        candidates: semantic.length,
+        url: location.href
       };
     }
 
@@ -147,7 +162,8 @@
         ok: true,
         messages: blocks.slice(-16).map(x => x.text),
         strategy: "conversation text-block fallback",
-        candidates: blocks.length
+        candidates: blocks.length,
+        url: location.href
       };
     }
 
@@ -156,7 +172,8 @@
       ok: true,
       messages: rootText.length >= 24 ? [rootText.slice(-30000)] : [],
       strategy: "conversation root fallback",
-      candidates: rootText.length ? 1 : 0
+      candidates: rootText.length ? 1 : 0,
+      url: location.href
     };
   }
 
@@ -192,7 +209,8 @@
         button.innerText, button.getAttribute("aria-label"),
         button.getAttribute("data-testid"), button.title
       ].join(" ").toLowerCase();
-      return /send|submit|إرسال/.test(label) &&
+      const aiStudioRun = provider?.id === "google-ai-studio" && /run/i.test(label);
+      return (/send|submit|إرسال/.test(label) || aiStudioRun) &&
         !/stop|cancel|إيقاف/.test(label);
     }) || null;
   }
@@ -272,6 +290,8 @@
         await api.runtime.sendMessage({
           type: "AGENTOS_PROVIDER_SNAPSHOT",
           messages: snapshot.messages,
+          url: snapshot.url || location.href,
+          provider: provider?.id || "unknown",
           strategy: snapshot.strategy
         });
       } catch (_) {}
