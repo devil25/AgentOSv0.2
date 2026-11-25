@@ -219,6 +219,47 @@
     }) || null;
   }
 
+  async function prepareContinuation() {
+    if (provider?.id !== "chatgpt") return { ok: true, handedOff: false, url: location.href };
+
+    const beforeUrl = location.href;
+    const buttons = [...document.querySelectorAll("button")].filter(visible);
+    let target = null;
+    for (const button of buttons) {
+      const label = (button.innerText || button.getAttribute("aria-label") || "").trim().toLowerCase();
+      if (label !== "new chat") continue;
+      let node = button;
+      for (let depth = 0; node && depth < 7; depth++, node = node.parentElement) {
+        const text = (node.innerText || "").toLowerCase();
+        if (text.includes("context window full")) {
+          target = button;
+          break;
+        }
+      }
+      if (target) break;
+    }
+    if (!target) return { ok: true, handedOff: false, url: location.href };
+
+    target.click();
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const composer = findComposer();
+      const modalStillOpen = [...document.querySelectorAll("button")].some(button =>
+        visible(button) && (button.innerText || "").trim().toLowerCase() === "new chat" &&
+        [...Array(7)].some((_, i) => {
+          let node = button;
+          for (let j = 0; j < i && node; j++) node = node.parentElement;
+          return Boolean(node && (node.innerText || "").toLowerCase().includes("context window full"));
+        })
+      );
+      if (location.href !== beforeUrl && composer && !modalStillOpen) {
+        return { ok: true, handedOff: true, url: location.href };
+      }
+    }
+    return { ok: false, handedOff: true, error: "ChatGPT's New chat button was clicked, but the new conversation did not become ready within 30 seconds.", url: location.href };
+  }
+
   async function inspect() {
     const composer = findComposer();
     const response = readAssistantResponse();
@@ -323,6 +364,6 @@
   setInterval(queueAssistantSnapshot, 3000);
 
   globalThis.AgentOSProvider = {
-    inspect, fillPrompt, submitPrompt, readAssistantMessages, readAssistantResponse
+    inspect, fillPrompt, submitPrompt, prepareContinuation, readAssistantMessages, readAssistantResponse
   };
 })();
