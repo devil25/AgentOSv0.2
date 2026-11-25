@@ -224,7 +224,7 @@
         if (!inserted) {
           throw new Error("ChatGPT's editor rejected text insertion; the prompt was not submitted.");
         }
-        const actual = (el.innerText || el.textContent || "").replace(/\\u00a0/g, " ").trim();
+        const actual = (el.innerText || el.textContent || "").replace(/\u00a0/g, " ").trim();
         if (!actual || !actual.includes(value.slice(0, Math.min(80, value.length)))) {
           throw new Error("ChatGPT's editor did not retain the inserted prompt; the prompt was not submitted.");
         }
