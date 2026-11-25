@@ -2,8 +2,7 @@
 Only tools named in allowed_tools can be called. Server processes inherit the
 current Windows user's permissions; configure only servers you trust.
 """
-import json, subprocess, itertools
-from pathlib import Path
+import json, subprocess
 from .paths import CONFIG
 
 class MCPError(RuntimeError): pass
@@ -35,7 +34,7 @@ def _connect(name):
     cfg,command,args=_server(name)
     proc=subprocess.Popen([command,*args],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",bufsize=1)
     try:
-        _request(proc,{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"AgentOS","version":"0.1.0"}}})
+        _request(proc,{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"AgentOS","version":"0.2.0-dev"}}})
         proc.stdin.write(json.dumps({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})+"\n");proc.stdin.flush()
         return proc,cfg
     except Exception:
