@@ -326,6 +326,18 @@ async function processModelResponse(state, response) {
 let responseProcessingTaskId = null;
 async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, continuationMarker = false) {
   let state = await readTaskState();
+  // A timed-out task may still have a valid assistant response in the continued
+  // ChatGPT conversation. Re-arm only this exact no-action/no-response timeout
+  // state when the continuation marker verifies the pending handoff.
+  if (state?.tabId === tabId &&
+      state.phase === "error" &&
+      state.error === "Timed out waiting for a completed response from the AI website. The prompt was not sent again." &&
+      state.provider === "chatgpt" &&
+      continuationMarker === true &&
+      state.conversationTransfer?.to === state.providerUrl &&
+      !state.action && !state.response) {
+    state = await writeTaskState({ ...state, phase: "awaiting_model", error: null });
+  }
   if (!state || state.tabId !== tabId) {
     return { ok: true, accepted: true, reason: "no-task-for-tab" };
   }
