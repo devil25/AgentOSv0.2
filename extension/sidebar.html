@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><div class="mark">A</div><div><b>AgentOS</b><small>Supervised Browser Agent · v0.2.0</small></div></div>
+    <div class="brand"><div class="mark">A</div><div><b>AgentOS</b><small>Supervised Browser Agent · v0.2.0-rc1</small></div></div>
     <span id="runtimeLed" class="led"></span>
   </header>
   <nav class="tabs">
@@ -31,7 +31,7 @@
       </div>
       <div class="card">
         <div class="eyebrow">TASK</div>
-        <p class="muted hint">Write a task. AgentOS sends it to the AI website open in the active tab. The AI response is only a proposal; it is never executed automatically.</p>
+        <p class="muted hint">Text-only tasks are answered directly. AgentOS proposes a tool action only when the task needs one. AI actions are reviewed and approved before execution.</p>
         <textarea id="taskInput" placeholder="Describe what you want AgentOS to do…"></textarea>
         <button id="sendTaskBtn" class="btn primary full">Send task to active AI website</button>
       </div>
@@ -43,9 +43,10 @@
       </div>
       <div class="card">
         <div class="eyebrow">REVIEW AI ACTION</div>
-        <p class="muted hint">Paste a supported JSON action from the AI response. Review it before running.</p>
+        <p class="muted hint">Only supported, valid JSON actions are loaded here. Review the complete action before running it.</p>
         <textarea id="commandInput" spellcheck="false" placeholder='{"protocol":"agentos.v1","type":"action","action":"workspace.create_file","arguments":{"path":"notes/hello.txt","content":"Hello"}}'></textarea>
         <button id="runBtn" class="btn primary full">Validate & run action</button>
+        <button id="continueBtn" class="btn secondary full" disabled>Send result to AI to continue task</button>
       </div>
       <div class="card">
         <div class="eyebrow">RESULT / LOG</div>
@@ -59,7 +60,7 @@
       <div class="card"><div class="eyebrow">PLUGIN MANAGER</div><p class="muted">Plugins run with Windows user permissions. Review plugin source and permissions before enabling.</p><button id="pluginsRefresh" class="btn secondary full">Refresh plugins</button><div id="pluginsList" class="list"></div></div>
     </section>
     <section id="panel-mcp" class="panel">
-      <div class="card"><div class="eyebrow">MODEL CONTEXT PROTOCOL</div><p class="muted">Local stdio MCP servers. Only tools explicitly listed in allowed_tools may be called.</p><button id="mcpRefresh" class="btn secondary full">Refresh MCP servers</button><div id="mcpList" class="list"></div></div>
+      <div class="card"><div class="eyebrow">MODEL CONTEXT PROTOCOL</div><p class="muted">Local stdio MCP servers. Only tools explicitly listed in allowed_tools may be called. MCP commands run with Windows user permissions.</p><button id="mcpRefresh" class="btn secondary full">Refresh MCP servers</button><div id="mcpList" class="list"></div></div>
     </section>
   </main>
   <footer><span>WEB-ONLY AI · HYBRID APPROVAL</span><span id="taskState">IDLE</span></footer>
