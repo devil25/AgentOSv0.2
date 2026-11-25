@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><div class="mark">A</div><div><b>AgentOS</b><small>Browser Agent · v0.1.0</small></div></div>
+    <div class="brand"><div class="mark">A</div><div><b>AgentOS</b><small>Supervised Browser Agent · v0.2.0</small></div></div>
     <span id="runtimeLed" class="led"></span>
   </header>
   <nav class="tabs">
@@ -25,14 +25,25 @@
         <div class="row"><button id="connectBtn" class="btn primary">Test Windows connection</button><button id="stopBtn" class="btn danger">Stop</button></div>
       </div>
       <div class="card">
+        <div class="eyebrow">AI WEBSITE BRIDGE</div>
+        <div id="providerText" class="muted">Checking active tab…</div>
+        <div class="row"><button id="providerCheckBtn" class="btn secondary">Detect provider</button><button id="readResponseBtn" class="btn secondary">Read AI response</button></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow">TASK</div>
+        <p class="muted hint">Write a task. AgentOS sends it to the AI website open in the active tab. The AI response is only a proposal; it is never executed automatically.</p>
+        <textarea id="taskInput" placeholder="Describe what you want AgentOS to do…"></textarea>
+        <button id="sendTaskBtn" class="btn primary full">Send task to active AI website</button>
+      </div>
+      <div class="card">
         <div class="eyebrow">CURRENT PAGE</div>
         <div id="pageTitle" class="page-title">No page captured</div>
-        <div id="pageUrl" class="muted break">Open a page and capture its visible text.</div>
+        <div id="pageUrl" class="muted break">Capture the visible page context.</div>
         <button id="captureBtn" class="btn secondary full">Capture page context</button>
       </div>
       <div class="card">
-        <div class="eyebrow">AGENTOS ACTION</div>
-        <p class="muted hint">Paste a JSON action returned by your AI website. Only supported, validated actions are executed.</p>
+        <div class="eyebrow">REVIEW AI ACTION</div>
+        <p class="muted hint">Paste a supported JSON action from the AI response. Review it before running.</p>
         <textarea id="commandInput" spellcheck="false" placeholder='{"protocol":"agentos.v1","type":"action","action":"workspace.create_file","arguments":{"path":"notes/hello.txt","content":"Hello"}}'></textarea>
         <button id="runBtn" class="btn primary full">Validate & run action</button>
       </div>
@@ -42,19 +53,16 @@
       </div>
     </section>
     <section id="panel-skills" class="panel">
-      <div class="card"><div class="eyebrow">AGENT SKILLS</div><p class="muted">Compatible with the open SKILL.md format. Import from GitHub using the included CLI, then refresh.</p><button id="skillsRefresh" class="btn secondary full">Refresh installed skills</button><div id="skillsList" class="list"></div></div>
-      <div class="card"><div class="eyebrow">INSTALL FROM GITHUB</div><p class="muted">Use PowerShell: <code>python D:\AgentOS\runtime\agentos_cli.py skills install-github OWNER/REPO</code></p></div>
+      <div class="card"><div class="eyebrow">AGENT SKILLS</div><p class="muted">Compatible with the open SKILL.md format. Imported skills are reference material and are not automatically executed.</p><button id="skillsRefresh" class="btn secondary full">Refresh installed skills</button><div id="skillsList" class="list"></div></div>
     </section>
     <section id="panel-plugins" class="panel">
-      <div class="card"><div class="eyebrow">PLUGIN MANAGER</div><p class="muted">Plugins are discovered from the local plugins directory. External plugin code is not auto-executed.</p><button id="pluginsRefresh" class="btn secondary full">Refresh plugins</button><div id="pluginsList" class="list"></div></div>
-      <div class="card"><div class="eyebrow">PLUGIN DEVELOPMENT</div><p class="muted">Add a folder containing plugin.json. Review its code and permissions before enabling it.</p></div>
+      <div class="card"><div class="eyebrow">PLUGIN MANAGER</div><p class="muted">Plugins run with Windows user permissions. Review plugin source and permissions before enabling.</p><button id="pluginsRefresh" class="btn secondary full">Refresh plugins</button><div id="pluginsList" class="list"></div></div>
     </section>
     <section id="panel-mcp" class="panel">
-      <div class="card"><div class="eyebrow">MODEL CONTEXT PROTOCOL</div><p class="muted">Local stdio MCP servers configured in config/mcp_servers.json. Only tools explicitly listed in allowed_tools may be called.</p><button id="mcpRefresh" class="btn secondary full">Refresh MCP servers</button><div id="mcpList" class="list"></div></div>
-      <div class="card"><div class="eyebrow">CONFIGURATION</div><p class="muted">Edit <code>D:\AgentOS\config\mcp_servers.json</code> and restart the host. MCP servers run with your Windows user permissions.</p></div>
+      <div class="card"><div class="eyebrow">MODEL CONTEXT PROTOCOL</div><p class="muted">Local stdio MCP servers. Only tools explicitly listed in allowed_tools may be called.</p><button id="mcpRefresh" class="btn secondary full">Refresh MCP servers</button><div id="mcpList" class="list"></div></div>
     </section>
   </main>
-  <footer><span>LOCAL-FIRST</span><span id="taskState">IDLE</span></footer>
+  <footer><span>WEB-ONLY AI · HYBRID APPROVAL</span><span id="taskState">IDLE</span></footer>
   <script src="sidebar.js"></script>
 </body>
 </html>
