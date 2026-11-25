@@ -53,9 +53,9 @@ class ActionTests(unittest.TestCase):
 
     def test_terminal_execute_uses_workspace_as_working_directory(self):
         completed = Mock(returncode=0, stdout="ok", stderr="")
-        with patch("agentos.actions.subprocess.run", return_value=completed) as run, \\
-             patch("agentos.actions.WORKSPACE", Path(tempfile.gettempdir())):
-            result = execute("terminal.execute", {"command": "echo ok"})
+        with patch("agentos.actions.WORKSPACE", Path(tempfile.gettempdir())):
+            with patch("agentos.actions.subprocess.run", return_value=completed) as run:
+                result = execute("terminal.execute", {"command": "echo ok"})
         self.assertTrue(result["ok"])
         self.assertEqual(result["stdout"], "ok")
         self.assertEqual(run.call_args.kwargs["cwd"], str(Path(tempfile.gettempdir()).resolve()))
