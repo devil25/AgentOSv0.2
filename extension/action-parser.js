@@ -28,6 +28,7 @@
   }
 
   function extractBalancedActions(text) {
+    let lastValidAction = null;
     for (let start = 0; start < text.length; start += 1) {
       if (text[start] !== "{") continue;
 
@@ -51,13 +52,13 @@
           depth -= 1;
           if (depth === 0) {
             const action = parseActionObject(text.slice(start, end + 1));
-            if (action) return action;
+            if (action) lastValidAction = action;
             break;
           }
         }
       }
     }
-    return null;
+    return lastValidAction;
   }
 
   function extractAction(text) {
@@ -65,13 +66,15 @@
 
     const fence = String.fromCharCode(96).repeat(3);
     const fencedPattern = new RegExp(fence + "(?:json)?\\s*([\\s\\S]*?)" + fence, "gi");
+    let lastFencedAction = null;
     for (const match of text.matchAll(fencedPattern)) {
       const action = parseActionObject(match[1]);
-      if (action) return action;
+      if (action) lastFencedAction = action;
     }
+    if (lastFencedAction) return lastFencedAction;
 
-    // Recover a valid action when an AI site adds a prefix such as "text"
-    // or explanatory prose before/after the JSON envelope.
+    // Responses may contain conversation history. Prefer the latest valid
+    // action instead of accidentally loading a stale action from an earlier turn.
     return extractBalancedActions(text);
   }
 
