@@ -145,7 +145,8 @@ async function readProviderMessages(tabId) {
   if (!result?.ok) throw new Error(result?.error || "Could not read the AI website response.");
   return {
     messages: (result.messages || []).filter(x => typeof x === "string" && x.trim()),
-    url: result.url || null
+    url: result.url || null,
+    strategy: result.strategy || null
   };
 }
 function responseDelta(messages, baseline) {
@@ -421,7 +422,7 @@ async function resumeTask(taskId) {
     try {
       await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
       const snapshot = await readProviderMessages(resumed.tabId);
-      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url);
+      await handleAssistantSnapshot(resumed.tabId, snapshot.messages, snapshot.url, snapshot.strategy);
     } catch (_) {}
   } else if (state.phase === "paused" && state.resumePhase === "awaiting_approval") {
     const attached = await reattachTaskTab(state);
@@ -441,7 +442,7 @@ async function resumeTask(taskId) {
     try {
       await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
       const snapshot = await readProviderMessages(state.tabId);
-      await handleAssistantSnapshot(state.tabId, snapshot.messages, snapshot.url);
+      await handleAssistantSnapshot(state.tabId, snapshot.messages, snapshot.url, snapshot.strategy);
     } catch (_) {}
   } else if (state.phase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "The browser stopped during an action. Its outcome is unknown; it was not replayed." });
