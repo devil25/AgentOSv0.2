@@ -42,7 +42,9 @@ async function readResponse(){
   const r=await api.runtime.sendMessage({type:"AGENTOS_PROVIDER_READ"});
   if(!r?.ok){out(r);return}
   const text=(r.messages||[]).join("\n\n---\n\n");
-  out(text||"No assistant response was detected yet.");
+  out(text ? {response:text, readStrategy:r.strategy||"unknown", candidates:r.candidates??null} :
+    {message:"No assistant response was detected yet.", readStrategy:r.strategy||"unknown", candidates:r.candidates??0,
+     hint:"The adapter could not find readable message blocks in the active tab. Check that the AI answer is fully visible, then retry."});
   if(text){
     const match=text.match(/```(?:json)?\s*([\s\S]*?)```/i);
     if(match && confirm("A JSON block was found. Copy it into the action review box?")){
