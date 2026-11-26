@@ -766,6 +766,10 @@ async function startTask(message) {
       await writeTaskState({ ...existing, phase: "paused", resumePhase: existing.phase, error: "Paused automatically because you switched to another AI conversation. Return to the original conversation and resume this task." });
     }
   }
+  const prompt = message.prompt;
+  if (typeof prompt !== "string" || !prompt.trim()) {
+    throw new Error("The initial AgentOS prompt is missing or empty.");
+  }
   await setStopped(false);
   const id = "task-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
   const state = {
@@ -776,7 +780,6 @@ async function startTask(message) {
     steps: 0, phase: "starting", startedAt: new Date().toISOString()
   };
   await setActiveTask(id);
-  const prompt = message.prompt;
   await writeTaskState(state);
   await sendPrompt(state, prompt);
   return { ok: true, state: await readTaskState(id) };
