@@ -63,14 +63,58 @@ test("persists the new DOM identity returned by an automatic handoff", () => {
     providerConversationId: "old-conversation"
   };
   const next = applyChatGPTHandoff(oldState, {
+    ok: true,
     handedOff: true,
+    contextWindowFullObserved: true,
+    triggerReason: "chatgpt-context-window-full",
+    fromUrl: "https://chatgpt.com/c/old",
+    toUrl: "https://chatgpt.com/c/new",
+    fromConversationId: "old-conversation",
+    toConversationId: "new-conversation",
     url: "https://chatgpt.com/c/new",
-    conversationId: "new-conversation"
+    conversationId: "new-conversation",
+    continuationMarker: false,
+    verification: "context-window-trigger-and-conversation-id-change"
   }, "2026-11-26T10:00:00.000Z");
   assert.equal(next.providerUrl, "https://chatgpt.com/c/new");
   assert.equal(next.providerConversationId, "new-conversation");
   assert.equal(next.conversationTransfer.fromConversationId, "old-conversation");
   assert.equal(next.conversationTransfer.toConversationId, "new-conversation");
+  assert.equal(next.handoffEvents.length, 1);
+  assert.equal(next.handoffEvents[0].taskId, "task-1");
+  assert.equal(next.handoffEvents[0].fromConversationId, "old-conversation");
+  assert.equal(next.handoffEvents[0].toConversationId, "new-conversation");
+  assert.equal(next.handoffEvents[0].triggerReason, "chatgpt-context-window-full");
+});
+
+test("accepts a same-identity context handoff only with the explicit continuation marker", () => {
+  const state = {
+    id: "task-2", provider: "chatgpt", tabId: 9,
+    providerUrl: "https://chatgpt.com/c/local-chatgpt:same",
+    providerConversationId: "local-chatgpt:same",
+    stageLedger: { "8": { number: 8, status: "passed" } }
+  };
+  const next = applyChatGPTHandoff(state, {
+    ok: true, handedOff: true, contextWindowFullObserved: true,
+    triggerReason: "chatgpt-context-window-full",
+    fromUrl: state.providerUrl, toUrl: state.providerUrl,
+    fromConversationId: "local-chatgpt:same",
+    toConversationId: "local-chatgpt:same",
+    url: state.providerUrl, conversationId: "local-chatgpt:same",
+    continuationMarker: true, verification: "continued-from-marker"
+  }, "2026-11-26T11:00:00.000Z");
+  assert.equal(next.providerConversationId, "local-chatgpt:same");
+  assert.equal(next.handoffEvents[0].continuationMarker, true);
+  assert.equal(next.handoffEvents[0].resumedStageNumber, 9);
+});
+
+test("rejects handoff claims without context-window trigger evidence", () => {
+  assert.throws(() => applyChatGPTHandoff({
+    provider: "chatgpt", providerUrl: "https://chatgpt.com/c/old"
+  }, {
+    ok: true, handedOff: true, url: "https://chatgpt.com/c/new",
+    conversationId: "new"
+  }), /verified ChatGPT context-window handoff/);
 });
 
 test("never carries the old ChatGPT identity when the handoff cannot provide a new one", () => {

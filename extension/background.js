@@ -18,6 +18,11 @@ const {
   requiresAgentAction,
   requiresUnfinishedStagedTask,
   nextNonActionRetryCount,
+  beginStageAttempt,
+  recordStageResult,
+  isStageAlreadyPassed,
+  nextDuplicateStageRetryCount,
+  buildDuplicateStageRetryPrompt,
   buildNonActionRetryPrompt
 } = taskContinuation;
 
@@ -340,7 +345,7 @@ async function sendPrompt(state, prompt) {
     if (state.provider === "chatgpt") {
       stage = "checking ChatGPT context window";
       const handoff = await tabRequest(state.tabId, "AGENTOS_PROVIDER_HANDOFF");
-      if (handoff?.handedOff && handoff.url) {
+      if (handoff?.ok === true && handoff?.handedOff === true && handoff.url) {
         state = await writeTaskState(
           applyChatGPTHandoff(state, handoff)
         );
@@ -553,7 +558,11 @@ async function processAction(state, approved) {
     return sendPrompt({ ...rejectedState, prompt }, prompt);
   }
   if (await isStopped()) return;
-  await writeTaskState({ ...state, phase: "executing" });
+  const stageLedgerAtStart = beginStageAttempt(state, state.action);
+  await writeTaskState({
+    ...state, phase: "executing",
+    ...(state.action?.action === "terminal.execute" ? { stageLedger: stageLedgerAtStart } : {})
+  });
   let result;
   try { result = await executeAction(state.action, state.id); }
   catch (error) { result = { ok: false, error: String(error.message || error) }; }
@@ -564,7 +573,12 @@ async function processAction(state, approved) {
     lastResult
   ].slice(-MAX_STEPS);
   // Reset the bounded recovery budget after each valid action.
-  const continuedState = { ...state, steps, lastResult, actionHistory, nonActionRetries: 0 };
+  const stageLedger = recordStageResult(state, lastResult);
+  const continuedState = {
+    ...state, steps, lastResult, actionHistory, nonActionRetries: 0,
+    duplicateStageRetries: 0,
+    ...(state.action?.action === "terminal.execute" ? { stageLedger } : {})
+  };
   const prompt = continuePrompt(continuedState, lastResult);
   const completed = await writeTaskState({
     ...continuedState, phase: "action_completed",
@@ -641,6 +655,24 @@ async function processModelResponse(state, response) {
     return;
   }
   const approvalNeeded = ready.autonomy !== "autonomous" || !AUTONOMOUS_ACTIONS.has(action.action);
+  if (isStageAlreadyPassed(ready, action)) {
+    const retryCount = nextDuplicateStageRetryCount(ready);
+    if (retryCount === null) {
+      await writeTaskState({
+        ...ready, phase: "error", action: null,
+        error: "The model repeatedly proposed a terminal command for a stage already recorded as passed. The duplicate command was not executed."
+      });
+      return;
+    }
+    const retryPrompt = buildDuplicateStageRetryPrompt(ready, action);
+    const retryState = await writeTaskState({
+      ...ready, phase: "action_completed", action: null, response: null,
+      finalResponse: null, duplicateStageRetries: retryCount,
+      prompt: retryPrompt, error: null
+    });
+    await sendPrompt(retryState, retryPrompt);
+    return;
+  }
   const awaiting = await writeTaskState({
     ...ready,
     phase: approvalNeeded ? "awaiting_approval" : "executing",

@@ -100,6 +100,64 @@ test("keeps a numbered multi-stage task incomplete until its final stage succeed
   assert.equal(requiresUnfinishedStagedTask(state), false);
 });
 
+test("stage ledger keeps a failed attempt retryable, then blocks a repeated successful stage", () => {
+  const {
+    beginStageAttempt, recordStageResult, isStageAlreadyPassed, getStageDescriptor
+  } = require("../task-continuation.js");
+  const action = {
+    action: "terminal.execute",
+    arguments: { command: "Write-Output 'HANDOFF_STAGE=24/25'; Write-Output 'STAGE_24_PASS'" }
+  };
+  assert.deepEqual(getStageDescriptor(action), { number: 24, total: 25, key: "24" });
+
+  let state = { stageLedger: {} };
+  state.stageLedger = beginStageAttempt(state, action, "2026-11-26T10:00:00.000Z");
+  state.stageLedger = recordStageResult(state, {
+    ...action, result: { ok: false, returncode: 1, stdout: "", stderr: "first attempt failed" }
+  }, "2026-11-26T10:00:01.000Z");
+  assert.equal(state.stageLedger["24"].status, "failed");
+  assert.equal(state.stageLedger["24"].attemptCount, 1);
+  assert.equal(isStageAlreadyPassed(state, action), false);
+
+  state.stageLedger = beginStageAttempt(state, action, "2026-11-26T10:00:02.000Z");
+  state.stageLedger = recordStageResult(state, {
+    ...action, result: {
+      ok: true, returncode: 0,
+      stdout: "HANDOFF_STAGE=24/25\\nSTAGE_24_PASS", stderr: ""
+    }
+  }, "2026-11-26T10:00:03.000Z");
+  assert.equal(state.stageLedger["24"].status, "passed");
+  assert.equal(state.stageLedger["24"].attemptCount, 2);
+  assert.equal(isStageAlreadyPassed(state, action), true);
+});
+
+test("stage ledger does not pass a command without its current execution pass marker", () => {
+  const { beginStageAttempt, recordStageResult } = require("../task-continuation.js");
+  const action = {
+    action: "terminal.execute",
+    arguments: { command: "Write-Output 'HANDOFF_STAGE=7/25'" }
+  };
+  let state = { stageLedger: {} };
+  state.stageLedger = beginStageAttempt(state, action);
+  state.stageLedger = recordStageResult(state, {
+    ...action, result: { ok: true, returncode: 0, stdout: "An old log says STAGE_07_PASS", stderr: "" }
+  });
+  assert.equal(state.stageLedger["7"].status, "failed");
+  assert.equal(state.stageLedger["7"].resultEvidence, "missing-stage-pass-marker");
+});
+
+test("ambiguous and non-stage terminal commands are not blocked by the stage ledger", () => {
+  const { isStageAlreadyPassed, getStageDescriptor } = require("../task-continuation.js");
+  assert.equal(getStageDescriptor({
+    action: "terminal.execute", arguments: { command: "Get-ChildItem" }
+  }), null);
+  assert.equal(isStageAlreadyPassed({
+    stageLedger: { "24": { status: "passed" } }
+  }, {
+    action: "terminal.execute", arguments: { command: "Get-ChildItem" }
+  }), false);
+});
+
 test("bounds non-action recovery attempts", () => {
   const { nextNonActionRetryCount } = require("../task-continuation.js");
   assert.equal(nextNonActionRetryCount({ nonActionRetries: 0 }), 1);

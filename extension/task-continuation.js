@@ -70,6 +70,7 @@
     const total = Number(match?.[1] || match?.[2] || 0);
     if (total < 2) return false;
     const history = Array.isArray(state?.actionHistory) ? state.actionHistory : [];
+    if (state?.stageLedger?.[String(total)]?.status === "passed") return false;
     const finalMarker = "HANDOFF_STAGE=" + String(total).padStart(2, "0") + "/" + total;
     const finalPass = "STAGE_" + String(total).padStart(2, "0") + "_PASS";
     return !history.some(entry => {
@@ -79,6 +80,83 @@
       const output = String(result.stdout || "") + "\n" + String(result.stderr || "");
       return result.ok === true && command.includes(finalMarker) && output.includes(finalPass);
     });
+  }
+
+  function getStageDescriptor(action) {
+    if (action?.action !== "terminal.execute") return null;
+    const command = action?.arguments?.command;
+    if (typeof command !== "string") return null;
+    const match = command.match(/HANDOFF_STAGE\\s*=\\s*(\\d{1,3})\\s*\\/\\s*(\\d{1,3})/i);
+    if (!match) return null;
+    const number = Number(match[1]);
+    const total = Number(match[2]);
+    if (!Number.isInteger(number) || !Number.isInteger(total) || number < 1 || total < 2 || number > total) return null;
+    return { number, total, key: String(number) };
+  }
+
+  function beginStageAttempt(state, action, at = new Date().toISOString()) {
+    const descriptor = getStageDescriptor(action);
+    if (!descriptor) return state?.stageLedger && typeof state.stageLedger === "object" ? state.stageLedger : {};
+    const ledger = { ...(state?.stageLedger || {}) };
+    const previous = ledger[descriptor.key] || {};
+    ledger[descriptor.key] = {
+      number: descriptor.number,
+      total: descriptor.total,
+      status: "running",
+      attemptCount: Number(previous.attemptCount || 0) + 1,
+      commandSignature: clipped(action.arguments.command, 400),
+      startedAt: at,
+      finishedAt: null,
+      resultEvidence: null
+    };
+    return ledger;
+  }
+
+  function recordStageResult(state, actionEntry, at = new Date().toISOString()) {
+    const descriptor = getStageDescriptor(actionEntry);
+    const ledger = { ...(state?.stageLedger || {}) };
+    if (!descriptor) return ledger;
+    const previous = ledger[descriptor.key] || {};
+    const result = actionEntry?.result || {};
+    const output = String(result.stdout || "") + "\\n" + String(result.stderr || "");
+    const passMarker = "STAGE_" + String(descriptor.number).padStart(2, "0") + "_PASS";
+    const markerPattern = new RegExp("(?:^|[^A-Z0-9_])" + passMarker + "(?:$|[^A-Z0-9_])", "i");
+    const succeeded = result.ok === true &&
+      (result.returncode === undefined || result.returncode === null || result.returncode === 0) &&
+      result.timed_out !== true &&
+      markerPattern.test(output);
+    ledger[descriptor.key] = {
+      number: descriptor.number,
+      total: descriptor.total,
+      status: succeeded ? "passed" : "failed",
+      attemptCount: Math.max(1, Number(previous.attemptCount || 0)),
+      commandSignature: clipped(actionEntry?.arguments?.command || previous.commandSignature || "", 400),
+      startedAt: previous.startedAt || null,
+      finishedAt: at,
+      resultEvidence: succeeded ? passMarker : (result.timed_out ? "timed-out" : result.ok !== true ? "execution-failed" : "missing-stage-pass-marker")
+    };
+    return ledger;
+  }
+
+  function isStageAlreadyPassed(state, action) {
+    const descriptor = getStageDescriptor(action);
+    return Boolean(descriptor && state?.stageLedger?.[descriptor.key]?.status === "passed");
+  }
+
+  function nextDuplicateStageRetryCount(state) {
+    const retries = Number(state?.duplicateStageRetries || 0);
+    return retries < 2 ? retries + 1 : null;
+  }
+
+  function buildDuplicateStageRetryPrompt(state, action) {
+    const descriptor = getStageDescriptor(action);
+    return [
+      "AGENTOS DUPLICATE STAGE GUARD",
+      "The proposed terminal action targets stage " + descriptor.number + "/" + descriptor.total + ", which is already recorded as PASSED by an actual terminal execution result.",
+      "This duplicate command was NOT executed. Do not retry or repeat this successful stage. Continue with the first stage whose ledger status is not passed, using one terminal.execute action for that next stage.",
+      "Original task and persisted stage ledger:",
+      JSON.stringify({ task: state?.task, stageLedger: state?.stageLedger || {} }, null, 2)
+    ].join("\\n\\n");
   }
 
   function nextNonActionRetryCount(state) {
@@ -104,6 +182,12 @@
     requiresAgentAction,
     requiresUnfinishedStagedTask,
     nextNonActionRetryCount,
+    getStageDescriptor,
+    beginStageAttempt,
+    recordStageResult,
+    isStageAlreadyPassed,
+    nextDuplicateStageRetryCount,
+    buildDuplicateStageRetryPrompt,
     buildNonActionRetryPrompt
   });
   globalThis.AgentOSTaskContinuation = api;

@@ -491,6 +491,8 @@
     if (!target) return { ok: true, handedOff: false, url: location.href };
 
     target.click();
+    const triggerReason = "chatgpt-context-window-full";
+    const contextWindowFullObserved = true;
     const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -510,27 +512,46 @@
         currentConversationId,
         continuationMarker
       );
-      // ChatGPT's context-window action may continue the same thread rather
-      // than create an unrelated conversation. In that case the explicit
-      // "Continued from ..." marker, a ready composer, and a dismissed
-      // context-limit dialog are sufficient even if URL and DOM ID are stable.
-      if ((location.href !== beforeUrl || continuationMarker) &&
+      const identityChanged = Boolean(beforeConversationId && currentConversationId &&
+        beforeConversationId !== currentConversationId);
+      // The context-window dialog is the trigger evidence. A continuation marker
+      // can verify a same-identity continuation; otherwise require a changed
+      // conversation identity or URL plus a ready composer and dismissed dialog.
+      if ((continuationMarker || identityChanged || location.href !== beforeUrl) &&
           composer && !modalStillOpen && identityReady) {
         return {
           ok: true,
           handedOff: true,
           url: location.href,
           conversationId: currentConversationId,
-          continuationMarker
+          continuationMarker,
+          contextWindowFullObserved,
+          triggerReason,
+          fromUrl: beforeUrl,
+          toUrl: location.href,
+          fromConversationId: beforeConversationId,
+          toConversationId: currentConversationId,
+          verification: continuationMarker
+            ? "continued-from-marker"
+            : identityChanged
+              ? "context-window-trigger-and-conversation-id-change"
+              : "context-window-trigger-and-url-change"
         };
       }
     }
     return {
       ok: false,
       handedOff: true,
-      error: "ChatGPT's New chat button was clicked, but the new conversation identity did not become ready within 30 seconds.",
+      error: "ChatGPT's context-window continuation control was activated, but a verified continuation did not become ready within 30 seconds.",
       url: location.href,
-      conversationId: getChatGPTConversationId()
+      conversationId: getChatGPTConversationId(),
+      contextWindowFullObserved,
+      triggerReason,
+      fromUrl: beforeUrl,
+      toUrl: location.href,
+      fromConversationId: beforeConversationId,
+      toConversationId: getChatGPTConversationId(),
+      verification: "not-verified"
     };
   }
 

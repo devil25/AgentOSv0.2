@@ -60,25 +60,58 @@
   }
 
   function applyChatGPTHandoff(state, handoff, at = new Date().toISOString()) {
-    if (state?.provider !== "chatgpt" || handoff?.handedOff !== true ||
+    if (state?.provider !== "chatgpt" || handoff?.ok !== true ||
+        handoff?.handedOff !== true || handoff?.contextWindowFullObserved !== true ||
+        handoff?.triggerReason !== "chatgpt-context-window-full" ||
         typeof handoff.url !== "string" || !handoff.url.trim()) {
-      throw new Error("A verified ChatGPT handoff is required.");
+      throw new Error("A verified ChatGPT context-window handoff is required.");
     }
-    const nextConversationId = normalizeIdentity(handoff.conversationId);
+    const nextConversationId = normalizeIdentity(handoff.toConversationId || handoff.conversationId);
+    const fromConversationId = normalizeIdentity(handoff.fromConversationId || state.providerConversationId);
+    const fromUrl = typeof handoff.fromUrl === "string" ? handoff.fromUrl : state.providerUrl;
+    const resumedStageNumber = (() => {
+      const passed = Object.values(state.stageLedger || {})
+        .filter(item => item?.status === "passed")
+        .map(item => Number(item.number || 0))
+        .filter(Number.isInteger);
+      return passed.length ? Math.max(...passed) + 1 : null;
+    })();
+    const event = {
+      id: (state.id || "task") + ":handoff:" + at,
+      at,
+      provider: "chatgpt",
+      taskId: state.id || null,
+      triggerReason: handoff.triggerReason,
+      fromUrl,
+      toUrl: handoff.toUrl || handoff.url,
+      fromConversationId,
+      toConversationId: nextConversationId,
+      continuationMarker: handoff.continuationMarker === true,
+      verification: handoff.verification || "context-window-trigger",
+      resumedStageNumber
+    };
+    const handoffEvents = [
+      ...(Array.isArray(state.handoffEvents) ? state.handoffEvents : []),
+      event
+    ].slice(-20);
     return {
       ...state,
       tabId: state.tabId,
       providerUrl: handoff.url,
       providerConversationId: nextConversationId,
+      handoffEvents,
       conversationTransfer: {
         ...(state.conversationTransfer || {}),
-        from: state.providerUrl,
+        from: fromUrl,
         to: handoff.url,
         observedUrl: handoff.url,
-        fromConversationId: normalizeIdentity(state.providerConversationId),
+        fromConversationId,
         toConversationId: nextConversationId,
         at,
-        method: "chatgpt-context-window-new-chat"
+        method: "chatgpt-context-window-new-chat",
+        triggerReason: handoff.triggerReason,
+        continuationMarker: handoff.continuationMarker === true,
+        verification: handoff.verification || "context-window-trigger"
       }
     };
   }
