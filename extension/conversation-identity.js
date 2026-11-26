@@ -69,6 +69,13 @@
     const nextConversationId = normalizeIdentity(handoff.toConversationId || handoff.conversationId);
     const fromConversationId = normalizeIdentity(handoff.fromConversationId || state.providerConversationId);
     const fromUrl = typeof handoff.fromUrl === "string" ? handoff.fromUrl : state.providerUrl;
+    const toUrl = typeof handoff.toUrl === "string" ? handoff.toUrl : handoff.url;
+    const hasContinuationEvidence = handoff.continuationMarker === true ||
+      Boolean(fromConversationId && nextConversationId && fromConversationId !== nextConversationId) ||
+      Boolean(fromUrl && toUrl && fromUrl !== toUrl);
+    if (!hasContinuationEvidence) {
+      throw new Error("A context-window handoff must include a continuation marker or changed conversation identity.");
+    }
     const resumedStageNumber = (() => {
       const passed = Object.values(state.stageLedger || {})
         .filter(item => item?.status === "passed")
@@ -83,7 +90,7 @@
       taskId: state.id || null,
       triggerReason: handoff.triggerReason,
       fromUrl,
-      toUrl: handoff.toUrl || handoff.url,
+      toUrl,
       fromConversationId,
       toConversationId: nextConversationId,
       continuationMarker: handoff.continuationMarker === true,

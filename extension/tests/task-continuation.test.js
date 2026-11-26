@@ -158,6 +158,20 @@ test("ambiguous and non-stage terminal commands are not blocked by the stage led
   }), false);
 });
 
+test("a failed final-stage ledger entry overrides legacy-looking pass text", () => {
+  const { requiresUnfinishedStagedTask } = require("../task-continuation.js");
+  const state = {
+    task: "Run all 25 stages.",
+    stageLedger: { "25": { number: 25, status: "failed" } },
+    actionHistory: [{
+      action: "terminal.execute",
+      arguments: { command: "Write-Output 'HANDOFF_STAGE=25/25'; Write-Output 'STAGE_25_PASS'" },
+      result: { ok: true, returncode: 0, stdout: "STAGE_25_PASS" }
+    }]
+  };
+  assert.equal(requiresUnfinishedStagedTask(state), true);
+});
+
 test("bounds non-action recovery attempts", () => {
   const { nextNonActionRetryCount } = require("../task-continuation.js");
   assert.equal(nextNonActionRetryCount({ nonActionRetries: 0 }), 1);

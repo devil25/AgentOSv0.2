@@ -70,7 +70,8 @@
     const total = Number(match?.[1] || match?.[2] || 0);
     if (total < 2) return false;
     const history = Array.isArray(state?.actionHistory) ? state.actionHistory : [];
-    if (state?.stageLedger?.[String(total)]?.status === "passed") return false;
+    const finalLedgerEntry = state?.stageLedger?.[String(total)];
+    if (finalLedgerEntry) return finalLedgerEntry.status !== "passed";
     const finalMarker = "HANDOFF_STAGE=" + String(total).padStart(2, "0") + "/" + total;
     const finalPass = "STAGE_" + String(total).padStart(2, "0") + "_PASS";
     return !history.some(entry => {
@@ -118,7 +119,7 @@
     if (!descriptor) return ledger;
     const previous = ledger[descriptor.key] || {};
     const result = actionEntry?.result || {};
-    const output = String(result.stdout || "") + "\\n" + String(result.stderr || "");
+    const output = String(result.stdout || "") + "\n" + String(result.stderr || "");
     const passMarker = "STAGE_" + String(descriptor.number).padStart(2, "0") + "_PASS";
     const markerPattern = new RegExp("^\\s*" + passMarker + "\\s*$", "im");
     const succeeded = result.ok === true &&

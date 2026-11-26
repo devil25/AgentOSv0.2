@@ -108,6 +108,21 @@ test("accepts a same-identity context handoff only with the explicit continuatio
   assert.equal(next.handoffEvents[0].resumedStageNumber, 9);
 });
 
+test("rejects same-identity handoff claims without the continuation marker", () => {
+  const url = "https://chatgpt.com/c/local-chatgpt:same";
+  assert.throws(() => applyChatGPTHandoff({
+    provider: "chatgpt", providerUrl: url, providerConversationId: "local-chatgpt:same"
+  }, {
+    ok: true, handedOff: true, contextWindowFullObserved: true,
+    triggerReason: "chatgpt-context-window-full",
+    fromUrl: url, toUrl: url,
+    fromConversationId: "local-chatgpt:same",
+    toConversationId: "local-chatgpt:same",
+    url, conversationId: "local-chatgpt:same",
+    continuationMarker: false
+  }), /continuation marker or changed conversation identity/);
+});
+
 test("rejects handoff claims without context-window trigger evidence", () => {
   assert.throws(() => applyChatGPTHandoff({
     provider: "chatgpt", providerUrl: "https://chatgpt.com/c/old"
