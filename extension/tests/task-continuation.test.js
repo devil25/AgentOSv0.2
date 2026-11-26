@@ -282,6 +282,7 @@ test("continuation treats the AgentOS task ID as canonical and workspace IDs as 
 });
 
 
+
 test("isolates each staged acceptance-test run under its canonical task ID", () => {
   const { buildTaskRunContext, buildInitialTaskPrompt } = require("../task-continuation.js");
   const initial = [
@@ -290,7 +291,7 @@ test("isolates each staged acceptance-test run under its canonical task ID", () 
     "أنشئ مجلداً مستقلاً:",
     "",
     "AgentOS_Final_Acceptance_2026"
-  ].join("\\n");
+  ].join("\n");
   const context = buildTaskRunContext(initial, "task-run-123-abc");
   assert.deepEqual(context, {
     testId: "AGENTOS-FINAL-2026-30",
@@ -301,7 +302,7 @@ test("isolates each staged acceptance-test run under its canonical task ID", () 
   const state = { id: "task-run-123-abc", ...context };
   const prompt = buildInitialTaskPrompt(state, initial);
   assert.match(prompt, /AGENTOS RUN-SCOPED ARTIFACT ISOLATION/);
-  assert.match(prompt, /AgentOS_Final_Acceptance_2026\\/runs\\/task-run-123-abc/);
+  assert.match(prompt, /AgentOS_Final_Acceptance_2026\/runs\/task-run-123-abc/);
   assert.match(prompt, /pre-existing test-root files.*read-only/i);
   assert.match(prompt, /Never derive or change it from a conversation ID/);
 });
@@ -320,7 +321,7 @@ test("carries the exact run evidence directory through automatic context continu
   };
   const prompt = buildContinuationPrompt(state);
   assert.match(prompt, /RUN-SCOPED ARTIFACT ISOLATION/);
-  assert.match(prompt, /AgentOS_Final_Acceptance_2026\\/runs\\/task-run-123-abc/);
+  assert.match(prompt, /AgentOS_Final_Acceptance_2026\/runs\/task-run-123-abc/);
   assert.match(prompt, /Preserve this exact directory across all conversation handoffs/);
 });
 
@@ -328,7 +329,7 @@ test("does not alter ordinary prompts or accept unsafe run directory paths", () 
   const { buildTaskRunContext, buildInitialTaskPrompt } = require("../task-continuation.js");
   assert.equal(buildTaskRunContext("Explain a programming concept.", "task-safe-1"), null);
   assert.equal(buildTaskRunContext(
-    "Test ID: TEST-1\\nRun 5 stages.\\nCreate an isolated folder: ..\\\\outside",
+    "Test ID: TEST-1\nRun 5 stages.\nCreate an isolated folder: ..\\outside",
     "task-safe-2"
   ), null);
   assert.equal(buildInitialTaskPrompt({ id: "task-safe-1" }, "ordinary prompt"), "ordinary prompt");
