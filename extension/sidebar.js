@@ -133,14 +133,14 @@ function renderActivity(state) {
   const phaseLabel = agentStopped && phase === "executing" ? "finishing current action" : phase.replace(/_/g, " ");
   const badge = $("activityBadge");
   badge.textContent = phaseLabel.toUpperCase();
-  badge.className = "badge " + (phase === "completed" ? "good" : ["error", "interrupted"].includes(phase) ? "bad" : ["executing", "awaiting_model", "submitting_prompt"].includes(phase) ? "warn" : "neutral");
+  badge.className = "badge " + (["completed", "cancelled"].includes(phase) ? "good" : ["error", "interrupted"].includes(phase) ? "bad" : ["executing", "awaiting_model", "submitting_prompt"].includes(phase) ? "warn" : "neutral");
   $("activityTask").textContent = state.task || "No active task";
   $("activityStepCount").textContent = Number(state.steps || 0) + (Number(state.steps || 0) === 1 ? " action" : " actions");
   $("activityPhase").textContent = phaseLabel;
   const progress = {
     starting: 8, submitting_prompt: 18, awaiting_model: 30, response_ready: 42,
     awaiting_approval: 50, executing: 68, action_completed: 78,
-    completed: 100, error: 100, interrupted: 100, paused: 50, step_limit: 100
+    completed: 100, cancelled: 100, error: 100, interrupted: 100, paused: 50, step_limit: 100
   };
   $("activityProgress").style.width = (progress[phase] ?? 5) + "%";
   renderTimeline(state.activity || []);
@@ -173,7 +173,20 @@ function renderActivity(state) {
   }
 }
 function renderTaskState(state) {
-  if (!state) return;
+  if (!state) {
+    activeTaskId = null;
+    logState("idle");
+    $("resumeTaskBtn").hidden = true;
+    $("approvalCard").hidden = true;
+    $("activityBadge").textContent = "IDLE";
+    $("activityBadge").className = "badge neutral";
+    $("activityTask").textContent = "No active task";
+    $("activityStepCount").textContent = "0 actions";
+    $("activityPhase").textContent = "Waiting for a task";
+    $("activityProgress").style.width = "0%";
+    renderTimeline([]);
+    return;
+  }
   if (state.id && state.id !== activeTaskId) {
     activeTaskId = state.id;
     terminalOutputBuffer = "";
@@ -201,6 +214,8 @@ function renderTaskState(state) {
   refreshStopState(state);
   if (state.phase === "completed") {
     out({ status: "completed", steps: state.steps || 0, finalResponse: state.finalResponse || state.response || "" });
+  } else if (state.phase === "cancelled") {
+    out({ status: "cancelled", steps: state.steps || 0, message: state.error || "Task permanently stopped." });
   } else if (state.phase === "error" || state.phase === "interrupted") {
     out({ status: state.phase, error: state.error || "The task was interrupted.", steps: state.steps || 0 });
   } else if (state.phase === "awaiting_approval") {
