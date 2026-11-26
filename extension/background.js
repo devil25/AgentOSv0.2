@@ -519,6 +519,9 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
   if (!state || state.tabId !== tabId) {
     return { ok: true, accepted: true, reason: "no-task-for-tab" };
   }
+  if (state.phase === "cancelled") {
+    return { ok: true, accepted: true, reason: "task-permanently-stopped" };
+  }
   const verifiedChatGPTIdentity = chatGPTConversationIdentityMatches(state, conversationId);
   if (rawUrl && verifiedChatGPTIdentity && state.providerUrl !== rawUrl) {
     state = await writeTaskState({ ...state, providerUrl: rawUrl, conversationTransfer: { ...(state.conversationTransfer || {}), from: state.providerUrl, to: rawUrl, observedUrl: rawUrl, verifiedBy: "chatgpt-dom-conversation-id", verifiedAt: new Date().toISOString() } });
