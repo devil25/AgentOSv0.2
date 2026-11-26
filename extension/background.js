@@ -14,7 +14,7 @@ if (!taskContinuation) {
   throw new Error("AgentOS task continuation helpers were not loaded.");
 }
 const {
-  buildContinuationPrompt,
+  buildTaskRunContext,\n  buildInitialTaskPrompt,\n  buildContinuationPrompt,
   requiresAgentAction,
   requiresUnfinishedStagedTask,
   nextNonActionRetryCount,
@@ -927,19 +927,22 @@ async function startTask(message) {
       await writeTaskState({ ...existing, phase: "paused", resumePhase: existing.phase, error: "Paused automatically because you switched to another AI conversation. Return to the original conversation and resume this task." });
     }
   }
-  const prompt = message.prompt;
-  if (typeof prompt !== "string" || !prompt.trim()) {
+  const initialPrompt = message.prompt;
+  if (typeof initialPrompt !== "string" || !initialPrompt.trim()) {
     throw new Error("The initial AgentOS prompt is missing or empty.");
   }
   await setStopped(false);
   const id = "task-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  const runContext = buildTaskRunContext(initialPrompt, id);
   const state = {
-    id, task: message.task, initialPrompt: prompt, actionHistory: [],
+    id, task: message.task, initialPrompt, actionHistory: [],
+    ...(runContext || {}),
     autonomy: message.autonomy === "autonomous" ? "autonomous" : "supervised",
     tabId: tab.id, provider: info.provider, providerUrl: info.url,
     providerConversationId: info.conversationId || null,
     steps: 0, phase: "starting", startedAt: new Date().toISOString()
   };
+  const prompt = buildInitialTaskPrompt(state, initialPrompt);
   await setActiveTask(id);
   await writeTaskState(state);
   await sendPrompt(state, prompt);
