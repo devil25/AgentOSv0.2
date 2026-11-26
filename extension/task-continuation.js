@@ -61,7 +61,7 @@
   }
   function requiresAgentAction(state) {
     const task = String(state?.task || "");
-    return /terminal\.execute|workspace\.(?:list|read_file|create_file)|powershell|power\s*shell|execute\s+(?:the\s+)?(?:command|steps|stages)|run\s+(?:the\s+)?(?:\d+|[a-z]+)\s+stages|\\b\\d{1,3}\\s+stages?\\b|hand.?off.*(?:test|regression)|(?:stage|step)\s*0*1\s*\/\s*\d+/i.test(task);
+    return /terminal\.execute|workspace\.(?:list|read_file|create_file)|powershell|power\s*shell|execute\s+(?:the\s+)?(?:command|steps|stages)|run\s+(?:the\s+)?(?:\d+|[a-z]+)\s+stages|\b\d{1,3}\s+stages?\b|hand.?off.*(?:test|regression)|(?:stage|step)\s*0*1\s*\/\s*\d+/i.test(task);
   }
 
   function requiresUnfinishedStagedTask(state) {
