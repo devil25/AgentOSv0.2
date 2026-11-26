@@ -59,6 +59,31 @@
     }
   }
 
+
+  function isVerifiedChatGPTContinuation(state, url, conversationId = null, continuationMarker = false) {
+    if (state?.provider !== "chatgpt" || state.phase !== "awaiting_model" ||
+        typeof state.id !== "string" || !state.id.trim()) return false;
+    const events = Array.isArray(state.handoffEvents) ? state.handoffEvents : [];
+    const event = [...events].reverse().find(item =>
+      item?.provider === "chatgpt" &&
+      item?.taskId === state.id &&
+      item?.triggerReason === "chatgpt-context-window-full" &&
+      typeof item?.toUrl === "string" && item.toUrl.trim()
+    );
+    if (!event) return false;
+    const transfer = state.conversationTransfer || {};
+    if (transfer.triggerReason !== event.triggerReason ||
+        transfer.method !== "chatgpt-context-window-new-chat" ||
+        (transfer.toConversationId || null) !== (event.toConversationId || null)) return false;
+
+    const currentUrl = typeof url === "string" ? url : "";
+    if (currentUrl && currentUrl === event.toUrl) return true;
+    const currentId = normalizeIdentity(conversationId);
+    const targetId = normalizeIdentity(event.toConversationId);
+    if (currentId && targetId && currentId === targetId) return true;
+    return continuationMarker === true;
+  }
+
   function applyChatGPTHandoff(state, handoff, at = new Date().toISOString()) {
     if (state?.provider !== "chatgpt" || handoff?.ok !== true ||
         handoff?.handedOff !== true || handoff?.contextWindowFullObserved !== true ||
@@ -127,6 +152,7 @@
     chatGPTConversationIdentityMatches,
     sameConversation,
     isChatGPTContinuationUrl,
+    isVerifiedChatGPTContinuation,
     applyChatGPTHandoff
   });
   globalThis.AgentOSConversationIdentity = api;
