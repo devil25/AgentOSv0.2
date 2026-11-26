@@ -1,12 +1,64 @@
+import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import patch
+import subprocess
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentos.actions import execute, handle
+
+
+class FakePipe:
+    def __init__(self, chunks=(), unblock_event=None):
+        self.chunks = iter(chunks)
+        self.unblock_event = unblock_event
+
+    def readline(self):
+        try:
+            return next(self.chunks)
+        except StopIteration:
+            if self.unblock_event is not None:
+                self.unblock_event.wait(timeout=5)
+            return ""
+
+
+class ContinuousPipe:
+    def __init__(self, stop_event):
+        self.stop_event = stop_event
+
+    def readline(self):
+        if self.stop_event.wait(timeout=0.001):
+            return ""
+        return "continuous output\\n"
+
+
+class FakeProcess:
+    def __init__(self, stdout=("ok\n",), stderr=(), returncode=0, blocking=False):
+        self._returncode = returncode
+        self._event = threading.Event()
+        event = self._event if blocking else None
+        self.stdout = FakePipe(stdout, event)
+        self.stderr = FakePipe(stderr, event)
+
+    def poll(self):
+        return self._returncode
+
+    def wait(self, timeout=None):
+        if self._returncode is None:
+            raise subprocess.TimeoutExpired("fake-process", timeout)
+        return self._returncode
+
+    def terminate(self):
+        self._returncode = -15
+        self._event.set()
+
+    def kill(self):
+        self._returncode = -9
+        self._event.set()
 
 
 class ActionTests(unittest.TestCase):
@@ -36,7 +88,7 @@ class ActionTests(unittest.TestCase):
     def test_create_read_and_no_overwrite(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            with patch("agentos.actions.WORKSPACE", root), patch("agentos.paths.WORKSPACE", root):
+            with patch("agentos.paths.WORKSPACE", root):
                 created = execute(
                     "workspace.create_file",
                     {"path": "notes/summary.md", "content": "AgentOS test"},
@@ -50,24 +102,168 @@ class ActionTests(unittest.TestCase):
                         {"path": "notes/summary.md", "content": "overwrite"},
                     )
 
-
     def test_terminal_execute_uses_workspace_as_working_directory(self):
-        completed = Mock(returncode=0, stdout="ok", stderr="")
-        with patch("agentos.actions.WORKSPACE", Path(tempfile.gettempdir())):
-            with patch("agentos.actions.subprocess.run", return_value=completed) as run:
+        process = FakeProcess(stdout=("ok\n",))
+        with patch("agentos.paths.WORKSPACE", Path(tempfile.gettempdir())):
+            with patch("agentos.actions.subprocess.Popen", return_value=process) as popen:
                 result = execute("terminal.execute", {"command": "echo ok"})
         self.assertTrue(result["ok"])
-        self.assertEqual(result["stdout"], "ok")
-        self.assertEqual(run.call_args.kwargs["cwd"], str(Path(tempfile.gettempdir()).resolve()))
-        self.assertFalse(run.call_args.kwargs["shell"])
+        self.assertEqual(result["stdout"], "ok\n")
+        self.assertEqual(popen.call_args.kwargs["cwd"], str(Path(tempfile.gettempdir()).resolve()))
+        self.assertFalse(popen.call_args.kwargs["shell"])
 
-    def test_terminal_execute_blocks_host_level_destructive_commands(self):
-        with self.assertRaisesRegex(ValueError, "Blocked host-level"):
-            execute("terminal.execute", {"command": "format C:"})
+    def test_terminal_execute_allows_unrestricted_command_text(self):
+        process = FakeProcess(stdout=("mocked\n",))
+        with patch("agentos.actions.subprocess.Popen", return_value=process) as popen:
+            result = execute("terminal.execute", {"command": "format C:"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(popen.call_args.args[0][-1], "format C:")
+
+    def test_terminal_execute_allows_external_working_directory(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            with tempfile.TemporaryDirectory() as external:
+                process = FakeProcess(stdout=("external\n",))
+                with patch("agentos.paths.WORKSPACE", Path(workspace)):
+                    with patch("agentos.actions.subprocess.Popen", return_value=process) as popen:
+                        result = execute("terminal.execute", {
+                            "command": "Get-Location",
+                            "cwd": external
+                        })
+                self.assertTrue(result["ok"])
+                self.assertEqual(popen.call_args.kwargs["cwd"], str(Path(external).resolve()))
+                self.assertEqual(result["cwd"], str(Path(external).resolve()))
+
+    def test_terminal_execute_rejects_nonexistent_working_directory(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            missing = str(Path(workspace) / "does-not-exist")
+            with patch("agentos.paths.WORKSPACE", Path(workspace)):
+                with self.assertRaisesRegex(ValueError, "existing directory"):
+                    execute("terminal.execute", {"command": "Get-Location", "cwd": missing})
+
+    def test_terminal_execute_streams_stdout_and_stderr_events(self):
+        process = FakeProcess(stdout=("first line\n",), stderr=("warning line\n",))
+        events = []
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {"command": "Write-Output test"}, emit=events.append)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["stdout"], "first line\n")
+        self.assertEqual(result["stderr"], "warning line\n")
+        self.assertEqual(events[0]["type"], "terminal.started")
+        self.assertIn("terminal.output", [event["type"] for event in events])
+        self.assertEqual(events[-1]["type"], "terminal.finished")
+        self.assertEqual(events[-1]["returncode"], 0)
+
+    def test_terminal_output_events_are_chunked_for_native_messaging(self):
+        process = FakeProcess(stdout=("x" * 9500,))
+        events = []
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {"command": "Write-Output test"}, emit=events.append)
+        chunks = [event["text"] for event in events if event["type"] == "terminal.output"]
+        self.assertTrue(result["ok"])
+        self.assertGreaterEqual(len(chunks), 3)
+        self.assertLessEqual(max(map(len, chunks)), 4000)
+        self.assertEqual("".join(chunks), "x" * 9500)
+
+    def test_native_action_handler_forwards_terminal_events(self):
+        process = FakeProcess(stdout=("native host stream\\n",))
+        events = []
+        payload = {
+            "protocol": "agentos.v1",
+            "type": "action.execute",
+            "action": "terminal.execute",
+            "arguments": {"command": "Write-Output test"},
+        }
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = handle(payload, emit=events.append)
+        self.assertTrue(result["ok"])
+        self.assertEqual(events[0]["type"], "terminal.started")
+        self.assertEqual(events[-1]["type"], "terminal.finished")
+        self.assertIn("terminal.output", [event["type"] for event in events])
+
+    def test_terminal_execute_returns_partial_output_on_timeout(self):
+        process = FakeProcess(
+            stdout=("partial stdout\n",),
+            stderr=("partial stderr\n",),
+            returncode=None,
+            blocking=True,
+        )
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {
+                "command": "Start-Sleep -Seconds 10",
+                "timeout_seconds": 1
+            })
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertIsNone(result["returncode"])
+        self.assertEqual(result["stdout"], "partial stdout\n")
+        self.assertEqual(result["stderr"], "partial stderr\n")
+
+    def test_terminal_timeout_still_applies_after_output_pipes_close(self):
+        process = FakeProcess(stdout=(), stderr=(), returncode=None)
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {
+                "command": "close-output-then-keep-running",
+                "timeout_seconds": 1,
+            })
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertIsNone(result["returncode"])
+
+    def test_terminal_timeout_is_enforced_during_continuous_output(self):
+        process = FakeProcess(stdout=(), stderr=(), returncode=None, blocking=True)
+        process.stdout = ContinuousPipe(process._event)
+        process.stderr = ContinuousPipe(process._event)
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {
+                "command": "continuous-output",
+                "timeout_seconds": 1
+            })
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertIsNone(result["returncode"])
+        self.assertTrue(result["stdout"])
+
+    @unittest.skipUnless(os.name == "nt", "PowerShell streaming integration test requires Windows")
+    def test_windows_powershell_streaming_integration(self):
+        events = []
+        result = execute(
+            "terminal.execute",
+            {
+                "command": "Write-Output 'agentos-stream-one'; Start-Sleep -Milliseconds 250; Write-Output 'agentos-stream-two'",
+                "timeout_seconds": 10,
+            },
+            emit=events.append,
+        )
+        self.assertTrue(result["ok"], result.get("stderr"))
+        self.assertIn("agentos-stream-one", result["stdout"])
+        self.assertIn("agentos-stream-two", result["stdout"])
+        output_events = [event for event in events if event["type"] == "terminal.output"]
+        self.assertTrue(output_events)
+        self.assertEqual(events[0]["type"], "terminal.started")
+        self.assertEqual(events[-1]["type"], "terminal.finished")
+
+    @unittest.skipUnless(os.name == "nt", "PowerShell timeout integration test requires Windows")
+    def test_windows_powershell_timeout_integration(self):
+        result = execute(
+            "terminal.execute",
+            {"command": "Start-Sleep -Seconds 5", "timeout_seconds": 1},
+        )
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertIsNone(result["returncode"])
+
+    def test_terminal_execute_accepts_timeout_up_to_600_seconds(self):
+        process = FakeProcess(stdout=("ok\n",))
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {
+                "command": "Get-Date",
+                "timeout_seconds": 600
+            })
+        self.assertTrue(result["ok"])
 
     def test_terminal_execute_rejects_invalid_timeout(self):
         with self.assertRaises(ValueError):
-            execute("terminal.execute", {"command": "echo ok", "timeout_seconds": 999})
+            execute("terminal.execute", {"command": "echo ok", "timeout_seconds": 601})
 
     def test_invalid_tool_arguments_are_rejected(self):
         with self.assertRaises(ValueError):

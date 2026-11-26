@@ -3,90 +3,141 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <title>AgentOS</title>
   <link rel="stylesheet" href="sidebar.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><div class="mark">A</div><div><b>AgentOS</b><small>Supervised Browser Agent · v0.2.0-rc1</small></div></div>
-    <span id="runtimeLed" class="led"></span>
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><span>A</span><i></i></div>
+      <div class="brand-copy"><b>AgentOS</b><small>SUPERVISED BROWSER AGENT <span>·</span> 0.3 DEVELOPMENT</small></div>
+    </div>
+    <div class="header-status"><span id="runtimeLed" class="led"></span><span>LOCAL RUNTIME</span></div>
   </header>
-  <nav class="tabs">
-    <button class="tab active" data-tab="agent">Agent</button>
-    <button class="tab" data-tab="skills">Skills</button>
-    <button class="tab" data-tab="plugins">Plugins</button>
-    <button class="tab" data-tab="mcp">MCP</button>
+
+  <nav class="tabs" aria-label="AgentOS sections">
+    <button class="tab active" data-tab="agent" aria-selected="true">Agent</button>
+    <button class="tab" data-tab="activity" aria-selected="false">Terminal <span class="tab-live-dot"></span></button>
+    <button class="tab" data-tab="skills" aria-selected="false">Skills</button>
+    <button class="tab" data-tab="plugins" aria-selected="false">Plugins</button>
+    <button class="tab" data-tab="mcp" aria-selected="false">MCP</button>
   </nav>
+
   <main>
     <section id="panel-agent" class="panel active">
       <div class="card status-card">
-        <div class="eyebrow">LOCAL RUNTIME</div>
-        <div class="statusline"><span id="runtimeText">Checking connection…</span><span id="runtimeBadge" class="badge warn">UNKNOWN</span></div>
-        <div class="row"><button id="connectBtn" class="btn primary">Test Windows connection</button><button id="stopBtn" class="btn danger">Stop</button></div>
+        <div class="section-heading"><div><div class="eyebrow">LOCAL RUNTIME</div><div id="runtimeText" class="status-copy">Checking connection…</div></div><span id="runtimeBadge" class="badge warn">CHECKING</span></div>
+        <div class="row"><button id="connectBtn" class="btn primary">Test connection</button><button id="stopBtn" class="btn danger">Stop agent</button></div><p class="muted hint">Stop prevents the next agent step. A PowerShell command already running is allowed to finish first.</p>
       </div>
+
       <div class="card">
-        <div class="eyebrow">WORKSPACE DIRECTORY</div>
+        <div class="eyebrow">WORKSPACE</div>
+        <label class="field-label" for="workspacePath">Project directory</label>
         <input id="workspacePath" class="path-input" type="text" value="Loading workspace…" readonly aria-label="Selected workspace folder">
-        <p class="muted hint">Choose the folder on this computer that AgentOS will use as its project workspace. File operations and terminal commands use this folder as their working directory.</p>
-        <div class="row">
-          <button id="chooseWorkspaceBtn" class="btn primary">Choose folder</button>
-          <button id="refreshWorkspaceBtn" class="btn secondary">Refresh</button>
-        </div>
+        <p class="muted hint">File operations and terminal commands use this folder by default. PowerShell can access other paths when the task requires it.</p>
+        <div class="row"><button id="chooseWorkspaceBtn" class="btn primary">Choose folder</button><button id="refreshWorkspaceBtn" class="btn secondary">Refresh</button></div>
       </div>
+
       <div class="card">
         <div class="eyebrow">AI WEBSITE BRIDGE</div>
-        <div id="providerText" class="muted">Checking active tab…</div>
-        <div class="row"><button id="providerCheckBtn" class="btn secondary">Detect provider</button><button id="readResponseBtn" class="btn secondary">Inspect latest response</button></div>
+        <div id="providerText" class="provider-copy">Checking active tab…</div>
+        <div class="row"><button id="providerCheckBtn" class="btn secondary">Detect provider</button><button id="readResponseBtn" class="btn secondary">Inspect response</button></div>
       </div>
+
       <div class="card">
-        <div class="eyebrow">AUTONOMY MODE</div>
+        <div class="eyebrow">AUTONOMY</div>
+        <label class="field-label" for="autonomySelect">Execution mode</label>
         <select id="autonomySelect" class="mode-select">
-          <option value="autonomous">Autonomous · execute project actions automatically</option>
+          <option value="autonomous">Autonomous · run supported actions automatically</option>
           <option value="supervised" selected>Supervised · approve every action</option>
         </select>
-        <p class="muted hint">Autonomous mode runs supported project tools without per-step approval. Supervised mode pauses for your approval before each action. Terminal commands use your Windows account permissions; the project working directory is not an OS sandbox.</p>
+        <p class="muted hint">Autonomous mode can run PowerShell without per-step approval. PowerShell uses your Windows account permissions and is not restricted to the workspace. Only run tasks you trust.</p>
       </div>
-      <div class="card">
-        <div class="eyebrow">TASK</div>
-        <p class="muted hint">Send one task. The background agent monitors new model replies, executes permitted actions, returns results to the same conversation, and continues automatically. You can close this sidebar while it works; keep the AI conversation tab open.</p>
-        <textarea id="taskInput" placeholder="Describe what you want AgentOS to do…"></textarea>
-        <button id="sendTaskBtn" class="btn primary full">Send task to active AI website</button>
+
+      <div class="card task-card">
+        <div class="section-heading"><div><div class="eyebrow">NEW TASK</div><div class="card-title">What should AgentOS do?</div></div><span class="task-icon">↗</span></div>
+        <textarea id="taskInput" placeholder="Describe a task, inspect a project, fix a bug…"></textarea>
+        <button id="sendTaskBtn" class="btn primary full">Send task <span aria-hidden="true">→</span></button>
         <button id="resumeTaskBtn" class="btn secondary full" hidden>Resume saved task</button>
       </div>
+
       <div class="card">
         <div class="eyebrow">CURRENT PAGE</div>
         <div id="pageTitle" class="page-title">No page captured</div>
         <div id="pageUrl" class="muted break">Capture the visible page context.</div>
         <button id="captureBtn" class="btn secondary full">Capture page context</button>
       </div>
+
       <div class="card">
         <div class="eyebrow">ACTION APPROVAL</div>
-        <p class="muted hint">In Supervised mode, AgentOS pauses here and waits for your decision before every tool action.</p>
+        <p class="muted hint">Supervised actions pause here until you approve or reject the exact proposed action.</p>
         <div id="approvalCard" class="approval-card" hidden>
-          <div class="eyebrow">ACTION APPROVAL REQUIRED</div>
+          <div class="approval-title"><span class="approval-dot"></span> ACTION APPROVAL REQUIRED</div>
           <pre id="approvalDetails" class="output"></pre>
-          <div class="row">
-            <button id="approveActionBtn" class="btn primary">Approve & execute</button>
-            <button id="rejectActionBtn" class="btn danger">Reject</button>
-          </div>
+          <div class="row"><button id="approveActionBtn" class="btn primary">Approve & execute</button><button id="rejectActionBtn" class="btn danger">Reject</button></div>
         </div>
       </div>
+
       <div class="card">
-        <div class="eyebrow">RESULT / LOG</div>
+        <div class="eyebrow">LATEST RESULT</div>
         <pre id="output" class="output">AgentOS ready. Connect the Windows runtime to begin.</pre>
       </div>
     </section>
+
+    <section id="panel-activity" class="panel">
+      <div class="activity-hero terminal-screen-header">
+        <div class="activity-hero-top">
+          <div>
+            <div class="eyebrow">LIVE EXECUTION CONSOLE</div>
+            <h2>Terminal</h2>
+            <div id="activityTask" class="activity-task">No active task</div>
+          </div>
+          <span id="activityBadge" class="badge neutral">IDLE</span>
+        </div>
+      </div>
+
+      <div class="card terminal-card terminal-workspace">
+        <div id="terminalTabs" class="terminal-tabs" role="tablist" aria-label="Terminal sessions">
+          <div class="terminal-tabs-empty">Terminal sessions will appear here.</div>
+        </div>
+        <div class="terminal-heading">
+          <div>
+            <span class="terminal-indicator"></span>
+            <div>
+              <div class="eyebrow">POWERSHELL SESSION</div>
+              <div id="terminalStatus" class="terminal-status">Waiting for command execution</div>
+            </div>
+          </div>
+          <span id="terminalStreamState" class="stream-state">● STANDBY</span>
+        </div>
+        <pre id="liveCommand" class="live-command">No command running</pre>
+        <div id="liveCommandMeta" class="terminal-meta">The command and its output will appear here in real time.</div>
+        <pre id="terminalLiveOutput" class="terminal-output" aria-live="polite">Waiting for the first terminal command…</pre>
+      </div>
+
+      <div class="row task-maintenance-actions">
+        <button id="checkAIResponseBtn" class="btn primary">Check AI response now</button>
+      </div>
+      <div class="row task-maintenance-actions">
+        <button id="permanentStopBtn" class="btn danger">Stop task permanently</button>
+        <button id="clearTaskHistoryBtn" class="btn secondary">Clear task history</button>
+      </div>
+      <p class="muted hint">Each terminal tab keeps the command and output from one terminal execution. Closing this sidebar does not stop the agent.</p>
+    </section>
+
     <section id="panel-skills" class="panel">
-      <div class="card"><div class="eyebrow">AGENT SKILLS</div><p class="muted">Compatible with the open SKILL.md format. Imported skills are reference material and are not automatically executed.</p><button id="skillsRefresh" class="btn secondary full">Refresh installed skills</button><div id="skillsList" class="list"></div></div>
+      <div class="card"><div class="eyebrow">AGENT SKILLS</div><div class="card-title">Installed capabilities</div><p class="muted">Compatible with the open SKILL.md format. Imported skills are reference material and are not automatically executed.</p><button id="skillsRefresh" class="btn secondary full">Refresh skills</button><div id="skillsList" class="list"></div></div>
     </section>
     <section id="panel-plugins" class="panel">
-      <div class="card"><div class="eyebrow">PLUGIN MANAGER</div><p class="muted">Plugins run with Windows user permissions. Review plugin source and permissions before enabling.</p><button id="pluginsRefresh" class="btn secondary full">Refresh plugins</button><div id="pluginsList" class="list"></div></div>
+      <div class="card"><div class="eyebrow">PLUGIN MANAGER</div><div class="card-title">Connected extensions</div><p class="muted">Plugins run with Windows user permissions. Review plugin source and permissions before enabling.</p><button id="pluginsRefresh" class="btn secondary full">Refresh plugins</button><div id="pluginsList" class="list"></div></div>
     </section>
     <section id="panel-mcp" class="panel">
-      <div class="card"><div class="eyebrow">MODEL CONTEXT PROTOCOL</div><p class="muted">Local stdio MCP servers. Only tools explicitly listed in allowed_tools may be called. MCP commands run with Windows user permissions.</p><button id="mcpRefresh" class="btn secondary full">Refresh MCP servers</button><div id="mcpList" class="list"></div></div>
+      <div class="card"><div class="eyebrow">MODEL CONTEXT PROTOCOL</div><div class="card-title">Local MCP servers</div><p class="muted">Only tools explicitly listed in allowed_tools may be called. MCP commands run with Windows user permissions.</p><button id="mcpRefresh" class="btn secondary full">Refresh MCP servers</button><div id="mcpList" class="list"></div></div>
     </section>
   </main>
-  <footer><span>WEB-ONLY AI · HYBRID APPROVAL</span><span id="taskState">IDLE</span></footer>
+
+  <footer><span>WEB-ONLY AI <i>·</i> HYBRID APPROVAL</span><span id="taskState">IDLE</span></footer>
   <script src="action-parser.js"></script>
   <script src="sidebar.js"></script>
 </body>

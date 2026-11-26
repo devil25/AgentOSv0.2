@@ -41,7 +41,11 @@ def main():
             if message is None:
                 break
             try:
-                result = handle(message)
+                def emit_event(event):
+                    if isinstance(event, dict):
+                        send_message({"agentos_event": True, **event})
+
+                result = handle(message, emit=emit_event)
             except Exception as exc:
                 audit("action.error", {"error": str(exc)})
                 result = {"ok": False, "error": str(exc)}

@@ -1,6 +1,10 @@
 import re
 import os
 import subprocess
+import queue
+import threading
+import time
+from pathlib import Path
 from . import paths as agent_paths
 from .paths import safe_workspace_path, SKILLS
 from .catalog import list_skills, list_plugins, list_mcp
@@ -45,26 +49,7 @@ def _workspace_relative(path):
     # Resolve both sides to avoid Windows short-name/case differences.
     return path.resolve().relative_to(agent_paths.WORKSPACE.resolve()).as_posix()
 
-def _validate_terminal_command(command):
-    """Reject common host-level destructive/security operations.
-
-    This is a guardrail, not an OS sandbox: child processes still inherit the
-    Windows user's permissions and may access paths outside the workspace.
-    """
-    blocked = [
-        r"\b(?:format|diskpart|shutdown|restart-computer|stop-computer)\b",
-        r"\b(?:reg(?:\.exe)?\s+(?:add|delete|import)|bcdedit|cipher)\b",
-        r"\b(?:takeown|icacls|set-acl|set-executionpolicy)\b",
-        r"\b(?:net\s+user|netsh|sc\s+(?:delete|config|stop))\b",
-        r"\b(?:clear-disk|initialize-disk|remove-partition|remove-disk)\b",
-        r"\b(?:add-mppreference|set-mppreference)\b",
-    ]
-    for pattern in blocked:
-        if re.search(pattern, command, flags=re.IGNORECASE):
-            raise ValueError("Blocked host-level or destructive command. Use a supervised/manual operation outside the project workspace.")
-
-
-def execute(action, args):
+def execute(action, args, emit=None):
     if not isinstance(action, str) or action not in SUPPORTED_ACTIONS:
         raise ValueError("Unsupported action: " + str(action))
     if not isinstance(args, dict):
@@ -148,39 +133,166 @@ def execute(action, args):
         }
 
     if action == "terminal.execute":
-        command = _required_text(args, "command", 12000)
-        _validate_terminal_command(command)
+        command = _required_text(args, "command", 100000)
         timeout = args.get("timeout_seconds", 120)
-        if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 180:
-            raise ValueError("'timeout_seconds' must be an integer from 1 to 180")
-        # Commands run with the project workspace as their working directory.
-        # The process still inherits the Windows user's OS permissions; this is
-        # a working-directory boundary, not an operating-system sandbox.
+        if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 600:
+            raise ValueError("'timeout_seconds' must be an integer from 1 to 600")
+
+        requested_cwd = args.get("cwd")
+        if requested_cwd is None or requested_cwd == "":
+            working_directory = agent_paths.WORKSPACE.resolve()
+        else:
+            if not isinstance(requested_cwd, str) or not requested_cwd.strip() or len(requested_cwd) > 1024:
+                raise ValueError("'cwd' must be a non-empty directory path under 1024 characters")
+            requested_path = Path(requested_cwd).expanduser()
+            if not requested_path.is_absolute():
+                requested_path = agent_paths.WORKSPACE / requested_path
+            working_directory = requested_path.resolve()
+            if not working_directory.exists() or not working_directory.is_dir():
+                raise ValueError("'cwd' must point to an existing directory")
+
         if os.name == "nt":
             argv = ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command]
         else:
             argv = ["/bin/bash", "-lc", command]
-        completed = subprocess.run(
+
+        started_at = time.time()
+        started_clock = time.monotonic()
+
+        def emit_event(event_type, **details):
+            if callable(emit):
+                try:
+                    emit({"type": event_type, **details})
+                except Exception:
+                    # A closed UI/native-messaging port must not break the command.
+                    pass
+
+        emit_event(
+            "terminal.started",
+            command=command[:12000],
+            cwd=str(working_directory),
+            timeout_seconds=timeout,
+            started_at=started_at,
+        )
+
+        process = subprocess.Popen(
             argv,
-            cwd=str(agent_paths.WORKSPACE.resolve()),
-            capture_output=True,
+            cwd=str(working_directory),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout,
+            bufsize=1,
             shell=False,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
         )
-        stdout = completed.stdout[-60000:]
-        stderr = completed.stderr[-60000:]
-        return {
-            "ok": completed.returncode == 0,
-            "returncode": completed.returncode,
-            "cwd": str(agent_paths.WORKSPACE.resolve()),
-            "stdout": stdout,
-            "stderr": stderr,
+        output_queue = queue.Queue(maxsize=64)
+
+        def pump_output(stream_name, pipe):
+            try:
+                for line in iter(pipe.readline, ""):
+                    if line:
+                        output_queue.put((stream_name, line))
+            finally:
+                output_queue.put((stream_name, None))
+
+        readers = [
+            threading.Thread(target=pump_output, args=("stdout", process.stdout), daemon=True),
+            threading.Thread(target=pump_output, args=("stderr", process.stderr), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
+
+        output = {"stdout": "", "stderr": ""}
+        active_streams = len(readers)
+        deadline = started_clock + timeout
+        timed_out = False
+
+        def enforce_timeout():
+            nonlocal timed_out
+            if timed_out or process.poll() is not None or time.monotonic() < deadline:
+                return
+            timed_out = True
+            try:
+                process.terminate()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+        while active_streams:
+            # Check the deadline even while output is continuously arriving.
+            # A full bounded queue also applies back-pressure to fast processes.
+            enforce_timeout()
+            wait_for = 0.15 if timed_out else min(0.15, max(0.0, deadline - time.monotonic()))
+            try:
+                stream_name, chunk = output_queue.get(timeout=wait_for)
+            except queue.Empty:
+                continue
+
+            if chunk is None:
+                active_streams -= 1
+                continue
+
+            output[stream_name] = (output[stream_name] + chunk)[-60000:]
+            # Keep native messages small even when a process emits a huge line.
+            for offset in range(0, len(chunk), 4000):
+                emit_event(
+                    "terminal.output",
+                    stream=stream_name,
+                    text=chunk[offset:offset + 4000],
+                    at=time.time(),
+                )
+
+        for reader in readers:
+            reader.join(timeout=0.25)
+
+        if timed_out:
+            returncode = None
+        else:
+            try:
+                # A process may close both output pipes and continue running.
+                # Keep the timeout active while waiting for its actual exit.
+                returncode = process.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                returncode = None
+
+        elapsed_ms = int((time.monotonic() - started_clock) * 1000)
+        result = {
+            "ok": not timed_out and returncode == 0,
+            "timed_out": timed_out,
+            "returncode": returncode,
+            "timeout_seconds": timeout,
+            "elapsed_ms": elapsed_ms,
+            "started_at": started_at,
+            "cwd": str(working_directory),
+            "stdout": output["stdout"],
+            "stderr": output["stderr"],
             "command": command,
-            "execution_scope": "workspace working directory; not an OS sandbox",
+            "execution_scope": "current operating-system user permissions; no workspace sandbox",
         }
+        emit_event(
+            "terminal.finished",
+            ok=result["ok"],
+            timed_out=timed_out,
+            returncode=returncode,
+            elapsed_ms=elapsed_ms,
+        )
+        return result
 
     if action == "workspace.create_file":
         p = safe_workspace_path(_required_text(args, "path", 1024))
@@ -196,7 +308,7 @@ def execute(action, args):
     raise ValueError("Unsupported action: " + str(action))
 
 
-def handle(payload):
+def handle(payload, emit=None):
     if not isinstance(payload, dict) or payload.get("protocol") != "agentos.v1":
         return {"ok": False, "error": "Unsupported protocol"}
 
@@ -221,7 +333,7 @@ def handle(payload):
         action = payload.get("action")
         args = payload.get("arguments", {})
         audit("action.request", {"action": action})
-        result = execute(action, args)
+        result = execute(action, args, emit=emit)
         audit("action.success", {"action": action})
         return result
     return {"ok": False, "error": "Unknown message type"}

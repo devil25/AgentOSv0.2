@@ -63,3 +63,55 @@ test("uses a unique ChatGPT DOM conversation identity across URL changes", () =>
   assert.equal(resolveChatGPTConversationId(["local-chatgpt:abc", "local-chatgpt:other"]), null);
   assert.equal(resolveChatGPTConversationId([]), null);
 });
+
+test("recognizes specific active-generation controls without false-positive Stop buttons", () => {
+  const { isGenerationControlLabel } = require("../provider-adapters.js");
+  assert.equal(isGenerationControlLabel("Stop generating"), true);
+  assert.equal(isGenerationControlLabel("Stop response"), true);
+  assert.equal(isGenerationControlLabel("Cancel response"), true);
+  assert.equal(isGenerationControlLabel("إيقاف التوليد"), true);
+  assert.equal(isGenerationControlLabel("Stop"), false);
+  assert.equal(isGenerationControlLabel("Stop sharing"), false);
+  assert.equal(isGenerationControlLabel("Submit"), false);
+});
+
+
+test("accepts ChatGPT context continuation marker even when the conversation identity is unchanged", () => {
+  const { isChatGPTContinuationReady } = require("../provider-adapters.js");
+  assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-old", true), true);
+  assert.equal(isChatGPTContinuationReady("conversation-old", null, true), true);
+  assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-new", false), true);
+  assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-old", false), false);
+  assert.equal(isChatGPTContinuationReady("conversation-old", null, false), false);
+  assert.equal(isChatGPTContinuationReady(null, "conversation-new", false), true);
+  assert.equal(isChatGPTContinuationReady(null, null, false), false);
+});
+
+
+test("detects a newly rendered ChatGPT user turn after Send", () => {
+  const { hasNewUserMessage } = require("../provider-adapters.js");
+  const submitted = "AGENTOS TASK CONTINUATION — SAME TASK, POSSIBLY NEW CONVERSATION";
+  assert.equal(hasNewUserMessage(
+    ["Earlier message", submitted + " Follow the original task."],
+    ["Earlier message"],
+    submitted
+  ), true);
+});
+
+test("does not treat a pre-existing matching user message as a new submission", () => {
+  const { hasNewUserMessage } = require("../provider-adapters.js");
+  const submitted = "AGENTOS TASK CONTINUATION — SAME TASK";
+  assert.equal(hasNewUserMessage(
+    [submitted + " Keep going."],
+    [submitted + " Keep going."],
+    submitted
+  ), false);
+});
+
+test("recognizes ChatGPT stop-button test identifiers without matching unrelated Stop controls", () => {
+  const { isGenerationControlLabel } = require("../provider-adapters.js");
+  assert.equal(isGenerationControlLabel("stop-button"), true);
+  assert.equal(isGenerationControlLabel("stop_generating_button"), true);
+  assert.equal(isGenerationControlLabel("Stop sharing"), false);
+});
+
