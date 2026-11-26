@@ -54,3 +54,26 @@ test("action history is bounded to the latest 40 records", () => {
   assert.match(prompt, /STEP_6_PASS/);
   assert.match(prompt, /STEP_45_PASS/);
 });
+
+test("recognizes tasks that explicitly require terminal or workspace actions", () => {
+  const { requiresAgentAction } = require("../task-continuation.js");
+  assert.equal(requiresAgentAction({ task: "Run 25 stages using terminal.execute." }), true);
+  assert.equal(requiresAgentAction({ task: "Execute the PowerShell command and report the output." }), true);
+  assert.equal(requiresAgentAction({ task: "List files with workspace.list." }), true);
+  assert.equal(requiresAgentAction({ task: "Explain what a Godot scene is." }), false);
+});
+
+test("builds one bounded action-protocol recovery prompt without claiming execution", () => {
+  const { buildNonActionRetryPrompt } = require("../task-continuation.js");
+  const state = {
+    task: "Run all 25 stages using terminal.execute.",
+    initialPrompt: "FULL_AGENTOS_INSTRUCTIONS_AND_TASK",
+    actionHistory: [],
+    steps: 0
+  };
+  const prompt = buildNonActionRetryPrompt(state, "I will start by checking the project.");
+  assert.match(prompt, /FULL_AGENTOS_INSTRUCTIONS_AND_TASK/);
+  assert.match(prompt, /has not executed any action/);
+  assert.match(prompt, /exactly ONE valid fenced JSON action envelope/);
+  assert.match(prompt, /I will start by checking the project/);
+});
