@@ -83,11 +83,32 @@
     };
   }
 
+  function isManualChatGPTHandoff(state, provider, url, conversationId = null) {
+    const pending = state?.manualHandoffPending;
+    if (state?.provider !== "chatgpt" || provider !== "chatgpt" ||
+        !pending || typeof url !== "string" || !url.trim()) return false;
+    const fromUrl = pending.fromUrl || state.providerUrl;
+    if (typeof fromUrl !== "string" || !fromUrl.trim()) return false;
+    try {
+      const before = new URL(fromUrl);
+      const current = new URL(url);
+      if (!["chatgpt.com", "chat.openai.com"].includes(current.hostname) ||
+          before.origin !== current.origin) return false;
+      const beforeId = normalizeIdentity(pending.fromConversationId);
+      const currentId = normalizeIdentity(conversationId);
+      if (beforeId && currentId) return beforeId !== currentId;
+      return before.pathname !== current.pathname;
+    } catch (_) {
+      return false;
+    }
+  }
+
   const api = Object.freeze({
     chatGPTConversationIdentityMatches,
     sameConversation,
     isChatGPTContinuationUrl,
-    applyChatGPTHandoff
+    applyChatGPTHandoff,
+    isManualChatGPTHandoff
   });
   globalThis.AgentOSConversationIdentity = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
