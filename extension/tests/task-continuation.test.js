@@ -23,7 +23,7 @@ test("continuation in a new conversation repeats the complete original AgentOS p
   const prompt = buildContinuationPrompt(state, latest);
   assert.match(prompt, /AGENTOS_SYSTEM_RULES_UNIQUE/);
   assert.match(prompt, /exact envelope/);
-  assert.match(prompt, /terminal\\.execute/);
+  assert.match(prompt, /terminal\.execute/);
   assert.match(prompt, /STAGE_01_PASS/);
   assert.match(prompt, /STAGE_02_PASS/);
   assert.match(prompt, /first stage that has not succeeded/);
@@ -36,7 +36,7 @@ test("legacy saved tasks still receive an explicit AgentOS action protocol", () 
     result: { ok: true, stdout: "project.godot" }
   });
   assert.match(prompt, /Inspect a project/);
-  assert.match(prompt, /agentos\\.v1/);
+  assert.match(prompt, /agentos\.v1/);
   assert.match(prompt, /Supported actions/);
 });
 
