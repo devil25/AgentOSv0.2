@@ -329,7 +329,7 @@ async function sendPrompt(state, prompt) {
   const snapshot = await readProviderMessages(state.tabId);
   const baseline = snapshot.messages;
   const submitting = await writeTaskState({
-    ...state, phase: "submitting_prompt", prompt, baseline, stopRequested: false,
+    ...state, phase: "submitting_prompt", prompt, baseline,
     baselineMessageIds: snapshot.messageIds || [],
     providerUrl: snapshot.url || state.providerUrl,
     providerConversationId: snapshot.conversationId || state.providerConversationId || null,
@@ -617,6 +617,7 @@ async function resumeTask(taskId) {
   const state = await readTaskState(taskId);
   if (state?.id) await setActiveTask(state.id);
   if (!state) throw new Error("There is no saved task.");
+  const wasStopped = await isStopped();
   await setStopped(false);
   if (state.phase === "response_ready" && state.response) {
     await processModelResponse(state, state.response);
@@ -651,9 +652,9 @@ async function resumeTask(taskId) {
         snapshot.continuationMarker, snapshot.messageIds, snapshot.conversationId
       );
     } catch (_) {}
-  } else if (state.phase === "executing" && state.stopRequested) {
-    // The in-flight action is still running. Do not replay it or mark it interrupted;
-    // clearing the stop flag above lets processAction continue after the current action returns.
+  } else if (state.phase === "executing" && wasStopped) {
+    // The stop request only blocks the next agent step. Let the in-flight action finish;
+    // clearing the global stop flag lets processAction continue without replaying it.
   } else if (state.phase === "executing") {
     await writeTaskState({ ...state, phase: "interrupted", error: "The browser stopped during an action. Its outcome is unknown; it was not replayed." });
   } else if (state.phase === "paused" && !state.resumePhase) {
@@ -713,17 +714,9 @@ api.runtime.onMessage.addListener((message, sender) => {
     const state = await readTaskState();
     if (state && ["awaiting_model", "awaiting_approval", "action_completed"].includes(state.phase)) {
       await writeTaskState({ ...state, phase: "paused", resumePhase: state.phase });
-    } else if (state?.phase === "executing") {
-      const activity = Array.isArray(state.activity) ? state.activity.slice() : [];
-      activity.push({
-        id: state.id + ":stop-requested:" + Date.now(),
-        at: new Date().toISOString(),
-        phase: "stop_requested",
-        title: "Stop requested",
-        message: "The current action will finish. AgentOS will not send the next action until resumed."
-      });
-      await writeTaskState({ ...state, stopRequested: true, activity: activity.slice(-40) });
     }
+    // While an action is executing, the stop flag prevents the next step.
+    // Do not rewrite the executing checkpoint: that action must be allowed to finish.
     return { ok: true, stopped: true };
   });
   if (message?.type === "AGENTOS_SET_STOP") return setStopped(message.value).then(stopped => ({ ok: true, stopped }));
