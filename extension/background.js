@@ -7,6 +7,7 @@ const {
   chatGPTConversationIdentityMatches,
   sameConversation,
   isChatGPTContinuationUrl,
+  isVerifiedChatGPTContinuation,
   applyChatGPTHandoff
 } = conversationIdentity;
 const taskContinuation = globalThis.AgentOSTaskContinuation;
@@ -164,17 +165,19 @@ async function taskStateForActiveTab() {
     // Adopt that URL only for the same tab/provider while awaiting the model.
     const active = await readTaskState();
     if (active && active.tabId === tab.id && active.provider === info.provider &&
-        active.phase === "awaiting_model" &&
-        (isChatGPTContinuationUrl(info.provider, info.url) ||
-          (info.provider === "chatgpt" && info.continuationMarker === true &&
-            active.conversationTransfer?.to === active.providerUrl))) {
+        isVerifiedChatGPTContinuation(active, info.url, info.conversationId, info.continuationMarker === true)) {
       const migrated = await writeTaskState({
         ...active,
         providerUrl: info.url,
         conversationTransfer: {
-          from: active.providerUrl,
-          to: info.url,
-          at: new Date().toISOString()
+          ...(active.conversationTransfer || {}),
+          observedUrl: info.url,
+          observedAt: new Date().toISOString(),
+          verifiedBy: info.continuationMarker === true
+            ? "chatgpt-continued-from-marker"
+            : active.conversationTransfer?.toConversationId
+              ? "chatgpt-handoff-conversation-id"
+              : "chatgpt-handoff-target-url"
         }
       });
       return migrated;
@@ -747,23 +750,22 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
     state = await writeTaskState({ ...state, providerUrl: rawUrl, conversationTransfer: { ...(state.conversationTransfer || {}), from: state.providerUrl, to: rawUrl, observedUrl: rawUrl, verifiedBy: "chatgpt-dom-conversation-id", verifiedAt: new Date().toISOString() } });
   }
   if (rawUrl && !sameConversation(state, state.provider, rawUrl, conversationId)) {
-    const verifiedChatGPTContinuation =
-      state.phase === "awaiting_model" &&
-      state.provider === "chatgpt" &&
-      continuationMarker === true &&
-      state.conversationTransfer?.to === state.providerUrl;
-    if (state.phase === "awaiting_model" &&
-        (isChatGPTContinuationUrl(state.provider, rawUrl) || verifiedChatGPTContinuation)) {
+    const verifiedChatGPTContinuation = isVerifiedChatGPTContinuation(
+      state, rawUrl, conversationId, continuationMarker === true
+    );
+    if (verifiedChatGPTContinuation) {
       state = await writeTaskState({
         ...state,
         providerUrl: rawUrl,
         conversationTransfer: {
           ...(state.conversationTransfer || {}),
-          from: state.conversationTransfer?.from || state.providerUrl,
-          to: state.conversationTransfer?.to || rawUrl,
           observedUrl: rawUrl,
-          verifiedBy: verifiedChatGPTContinuation ? "chatgpt-continued-from-marker" : "local-chatgpt-url",
-          verifiedAt: new Date().toISOString()
+          observedAt: new Date().toISOString(),
+          verifiedBy: continuationMarker === true
+            ? "chatgpt-continued-from-marker"
+            : state.conversationTransfer?.toConversationId
+              ? "chatgpt-handoff-conversation-id"
+              : "chatgpt-handoff-target-url"
         }
       });
     } else {
