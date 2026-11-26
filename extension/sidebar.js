@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 let activeTaskId = null;
 let terminalOutputBuffer = "";
 let lastRenderedResultKey = null;
+let agentStopped = false;
 
 const AGENTOS_INSTRUCTIONS = [
   "You are the reasoning engine for AgentOS, a persistent browser-based coding agent similar to OpenCode.",
@@ -129,7 +130,7 @@ function renderTimeline(activity) {
 function renderActivity(state) {
   if (!state) return;
   const phase = state.phase || "idle";
-  const phaseLabel = state.stopRequested && phase === "executing" ? "finishing current action" : phase.replace(/_/g, " ");
+  const phaseLabel = agentStopped && phase === "executing" ? "finishing current action" : phase.replace(/_/g, " ");
   const badge = $("activityBadge");
   badge.textContent = phaseLabel.toUpperCase();
   badge.className = "badge " + (phase === "completed" ? "good" : ["error", "interrupted"].includes(phase) ? "bad" : ["executing", "awaiting_model", "submitting_prompt"].includes(phase) ? "warn" : "neutral");
@@ -149,7 +150,7 @@ function renderActivity(state) {
     const args = currentAction.arguments || {};
     $("liveCommand").textContent = args.command || "Terminal command";
     $("liveCommandMeta").textContent = (args.cwd ? "cwd: " + args.cwd : "cwd: selected workspace") + " · timeout: " + (args.timeout_seconds || 120) + "s";
-    if (phase === "executing") setTerminalRunning(true, state.stopRequested ? "Stop requested · current command is finishing" : "PowerShell command is running");
+    if (phase === "executing") setTerminalRunning(true, agentStopped ? "Stop requested · current command is finishing" : "PowerShell command is running");
     else setTerminalRunning(false, "Waiting for approval before execution");
   } else if (state.lastResult?.action === "terminal.execute") {
     $("liveCommand").textContent = state.lastResult.arguments?.command || "Last terminal command";
@@ -348,9 +349,13 @@ async function refreshStopState(state = null) {
     const task = await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_GET" });
     current = task?.state || null;
   }
-  const finishingCurrentAction = Boolean(result?.stopped && current?.phase === "executing" && current.stopRequested);
+  const wasStopped = Boolean(result?.stopped);
+  const finishingCurrentAction = Boolean(wasStopped && current?.phase === "executing");
+  const changed = agentStopped !== wasStopped;
+  agentStopped = wasStopped;
   $("stopBtn").textContent = finishingCurrentAction ? "Finishing action…" : result?.stopped ? "Resume agent" : "Stop agent";
   $("stopBtn").disabled = finishingCurrentAction;
+  if (changed && current) renderActivity(current);
 }
 $("chooseWorkspaceBtn").addEventListener("click", chooseWorkspace);
 $("refreshWorkspaceBtn").addEventListener("click", loadWorkspace);
