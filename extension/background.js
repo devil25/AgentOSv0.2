@@ -28,9 +28,9 @@ async function readTaskState(taskId) {
 }
 function redactActivityText(value) {
   return String(value || "")
-    .replace(/(authorization\\s*[:=]\\s*["']?Bearer\\s+)[A-Za-z0-9._~+\\/-]+/gi, "$1[REDACTED]")
-    .replace(/(bearer\\s+)[A-Za-z0-9._~+\\/-]{12,}/gi, "$1[REDACTED]")
-    .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret)(\\s*[:=]\\s*["']?)[^\\s,"']+/gi, "$1$2[REDACTED]")
+    .replace(/(authorization\s*[:=]\s*["']?Bearer\s+)[A-Za-z0-9._~+\/-]+/gi, "$1[REDACTED]")
+    .replace(/(bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi, "$1[REDACTED]")
+    .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret)(\s*[:=]\s*["']?)[^\s,"']+/gi, "$1$2[REDACTED]")
     .slice(0, 5000);
 }
 
@@ -229,11 +229,11 @@ async function nativeRequest(payload) {
     port.onMessage.addListener((message) => {
       if (message?.agentos_event === true) {
         try {
-          api.runtime.sendMessage({
+          Promise.resolve(api.runtime.sendMessage({
             type: "AGENTOS_TERMINAL_EVENT",
             taskId: payload?.task_id || null,
             event: message
-          });
+          })).catch(() => {});
         } catch (_) {}
         return;
       }
