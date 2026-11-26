@@ -129,7 +129,7 @@ function renderTimeline(activity) {
 function renderActivity(state) {
   if (!state) return;
   const phase = state.phase || "idle";
-  const phaseLabel = phase.replace(/_/g, " ");
+  const phaseLabel = state.stopRequested && phase === "executing" ? "finishing current action" : phase.replace(/_/g, " ");
   const badge = $("activityBadge");
   badge.textContent = phaseLabel.toUpperCase();
   badge.className = "badge " + (phase === "completed" ? "good" : ["error", "interrupted"].includes(phase) ? "bad" : ["executing", "awaiting_model", "submitting_prompt"].includes(phase) ? "warn" : "neutral");
@@ -149,7 +149,7 @@ function renderActivity(state) {
     const args = currentAction.arguments || {};
     $("liveCommand").textContent = args.command || "Terminal command";
     $("liveCommandMeta").textContent = (args.cwd ? "cwd: " + args.cwd : "cwd: selected workspace") + " · timeout: " + (args.timeout_seconds || 120) + "s";
-    if (phase === "executing") setTerminalRunning(true, "PowerShell command is running");
+    if (phase === "executing") setTerminalRunning(true, state.stopRequested ? "Stop requested · current command is finishing" : "PowerShell command is running");
     else setTerminalRunning(false, "Waiting for approval before execution");
   } else if (state.lastResult?.action === "terminal.execute") {
     $("liveCommand").textContent = state.lastResult.arguments?.command || "Last terminal command";
@@ -197,6 +197,7 @@ function renderTaskState(state) {
   }
   if (state.task && !$("taskInput").value.trim()) $("taskInput").value = state.task;
   renderActivity(state);
+  refreshStopState(state);
   if (state.phase === "completed") {
     out({ status: "completed", steps: state.steps || 0, finalResponse: state.finalResponse || state.response || "" });
   } else if (state.phase === "error" || state.phase === "interrupted") {
@@ -340,9 +341,16 @@ async function list(kind, target) {
     target.append(element);
   }
 }
-async function refreshStopState() {
+async function refreshStopState(state = null) {
   const result = await api.runtime.sendMessage({ type: "AGENTOS_GET_STOP" });
-  $("stopBtn").textContent = result?.stopped ? "Resume agent" : "Stop agent";
+  let current = state;
+  if (!current) {
+    const task = await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_GET" });
+    current = task?.state || null;
+  }
+  const finishingCurrentAction = Boolean(result?.stopped && current?.phase === "executing" && current.stopRequested);
+  $("stopBtn").textContent = finishingCurrentAction ? "Finishing action…" : result?.stopped ? "Resume agent" : "Stop agent";
+  $("stopBtn").disabled = finishingCurrentAction;
 }
 $("chooseWorkspaceBtn").addEventListener("click", chooseWorkspace);
 $("refreshWorkspaceBtn").addEventListener("click", loadWorkspace);
