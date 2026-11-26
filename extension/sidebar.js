@@ -112,8 +112,8 @@ function renderTimeline(activity) {
     if (entry.stdout || entry.stderr) {
       const output = document.createElement("pre");
       output.className = "timeline-command";
-      output.textContent = (entry.stdout ? "[stdout]\\n" + entry.stdout : "") +
-        (entry.stderr ? (entry.stdout ? "\\n" : "") + "[stderr]\\n" + entry.stderr : "");
+      output.textContent = (entry.stdout ? "[stdout]\n" + entry.stdout : "") +
+        (entry.stderr ? (entry.stdout ? "\n" : "") + "[stderr]\n" + entry.stderr : "");
       content.append(output);
     }
     if (entry.timed_out) {
