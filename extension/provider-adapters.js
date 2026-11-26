@@ -86,6 +86,10 @@
   function normalizeMessageText(value) {
     return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
   }
+  
+  function isChatGPTNewChatButtonLabel(value) {
+    return /^new chat(?:\\b|$)/i.test(normalizeMessageText(value));
+  }
 
   function hasNewUserMessage(currentMessages, baselineMessages, submittedText) {
     const promptPrefix = normalizeMessageText(submittedText).slice(0, 80);
@@ -120,7 +124,8 @@
       resolveChatGPTConversationId,
       isChatGPTContinuationReady,
       isGenerationControlLabel,
-      hasNewUserMessage
+      hasNewUserMessage,
+      isChatGPTNewChatButtonLabel
     });
     return;
   }
@@ -599,6 +604,30 @@
       }
     }
     throw new Error("The Send control was activated, but AgentOS could not verify that ChatGPT accepted the prompt within 20 seconds. The prompt may already be present in the conversation; it was not resent. Inspect the conversation before retrying.");
+  }
+
+  // Record an explicit user click on ChatGPT's New chat control. The background
+  // controller only treats it as a handoff when this tab owns an unfinished task.
+  if (provider?.id === "chatgpt") {
+    document.addEventListener("click", event => {
+      if (!event.isTrusted) return;
+      const origin = event.target instanceof Element ? event.target : event.target?.parentElement;
+      const target = origin?.closest?.("button, [role='button'], a");
+      if (!target || !visible(target)) return;
+      const label = [
+        target.innerText, target.getAttribute("aria-label"),
+        target.getAttribute("data-testid"), target.title
+      ].filter(Boolean).join(" ");
+      if (!isChatGPTNewChatButtonLabel(label)) return;
+      try {
+        Promise.resolve(api.runtime.sendMessage({
+          type: "AGENTOS_CHATGPT_NEW_CHAT_CLICKED",
+          fromUrl: location.href,
+          fromConversationId: getChatGPTConversationId(),
+          clickedAt: new Date().toISOString()
+        })).catch(() => {});
+      } catch (_) {}
+    }, true);
   }
 
   // Observe the provider page independently of the sidebar lifetime. A quiet,
