@@ -76,13 +76,15 @@ test("recognizes specific active-generation controls without false-positive Stop
 });
 
 
-test("requires a genuinely new ChatGPT DOM identity after a context-window handoff", () => {
+test("accepts ChatGPT context continuation marker even when the conversation identity is unchanged", () => {
   const { isChatGPTContinuationReady } = require("../provider-adapters.js");
-  assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-old", false), false);
+  assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-old", true), true);
+  assert.equal(isChatGPTContinuationReady("conversation-old", null, true), true);
   assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-new", false), true);
+  assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-old", false), false);
+  assert.equal(isChatGPTContinuationReady("conversation-old", null, false), false);
   assert.equal(isChatGPTContinuationReady(null, "conversation-new", false), true);
-  assert.equal(isChatGPTContinuationReady(null, null, true), true);
-  assert.equal(isChatGPTContinuationReady("conversation-old", null, true), false);
+  assert.equal(isChatGPTContinuationReady(null, null, false), false);
 });
 
 
@@ -113,12 +115,3 @@ test("recognizes ChatGPT stop-button test identifiers without matching unrelated
   assert.equal(isGenerationControlLabel("Stop sharing"), false);
 });
 
-
-test("recognizes the explicit ChatGPT New chat control without matching longer labels", () => {
-  const { isChatGPTNewChatButtonLabel } = require("../provider-adapters.js");
-  assert.equal(isChatGPTNewChatButtonLabel("New chat"), true);
-  assert.equal(isChatGPTNewChatButtonLabel("NEW CHAT"), true);
-  assert.equal(isChatGPTNewChatButtonLabel("New chat Ctrl Shift O"), true);
-  assert.equal(isChatGPTNewChatButtonLabel("Share chat"), false);
-  assert.equal(isChatGPTNewChatButtonLabel("Chat history"), false);
-});
