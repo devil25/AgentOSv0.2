@@ -16,6 +16,8 @@ if (!taskContinuation) {
 const {
   buildContinuationPrompt,
   requiresAgentAction,
+  requiresUnfinishedStagedTask,
+  nextNonActionRetryCount,
   buildNonActionRetryPrompt
 } = taskContinuation;
 
@@ -561,7 +563,8 @@ async function processAction(state, approved) {
     ...(Array.isArray(state.actionHistory) ? state.actionHistory : []),
     lastResult
   ].slice(-MAX_STEPS);
-  const continuedState = { ...state, steps, lastResult, actionHistory };
+  // Reset the bounded recovery budget after each valid action.
+  const continuedState = { ...state, steps, lastResult, actionHistory, nonActionRetries: 0 };
   const prompt = continuePrompt(continuedState, lastResult);
   const completed = await writeTaskState({
     ...continuedState, phase: "action_completed",
@@ -581,31 +584,28 @@ async function processModelResponse(state, response) {
   const ready = await writeTaskState({ ...state, phase: "response_ready", response });
   const action = globalThis.AgentOSActionParser?.extractAction(response) || null;
   if (!action) {
-    // A tool-required task must not be marked complete merely because the
-    // model answered in prose before executing its first action. Give it one
-    // bounded protocol-recovery attempt; no action has run, so this is safe.
-    if (requiresAgentAction(ready) && Number(ready.steps || 0) === 0) {
-      const retries = Number(ready.nonActionRetries || 0);
-      if (retries < 1) {
+    // Never mark an unfinished numbered task complete because the model
+    // returned prose between actions. Recover from the persisted action ledger.
+    const stagedWorkRemains = requiresUnfinishedStagedTask(ready);
+    const needsAction = requiresAgentAction(ready) &&
+      (Number(ready.steps || 0) === 0 || stagedWorkRemains);
+    if (needsAction) {
+      const retryCount = nextNonActionRetryCount(ready);
+      if (retryCount !== null) {
         const retryPrompt = buildNonActionRetryPrompt(ready, response);
         const retryState = await writeTaskState({
-          ...ready,
-          phase: "action_completed",
-          response: null,
-          finalResponse: null,
-          action: null,
-          error: null,
-          nonActionRetries: retries + 1,
-          prompt: retryPrompt
+          ...ready, phase: "action_completed", response: null,
+          finalResponse: null, action: null, error: null,
+          nonActionRetries: retryCount, prompt: retryPrompt
         });
         await sendPrompt(retryState, retryPrompt);
         return;
       }
       await writeTaskState({
-        ...ready,
-        phase: "error",
-        finalResponse: null,
-        error: "The AI website returned ordinary text instead of a valid AgentOS action, even after one protocol-recovery attempt. No terminal command was executed. Inspect the AI response before retrying."
+        ...ready, phase: "error", finalResponse: null,
+        error: stagedWorkRemains
+          ? "The AI website returned ordinary text instead of the next required AgentOS action. The staged task is still incomplete; no completion was recorded. Resume after inspecting the conversation."
+          : "The AI website returned ordinary text instead of a valid AgentOS action after the bounded protocol-recovery attempts. No action was executed. Inspect the AI response before retrying."
       });
       return;
     }
