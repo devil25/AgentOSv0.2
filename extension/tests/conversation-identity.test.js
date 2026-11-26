@@ -152,3 +152,57 @@ test("never carries the old ChatGPT identity when the handoff cannot provide a n
   assert.equal(next.providerConversationId, null);
 });
 
+test("preserves one canonical AgentOS task ID across multiple verified context handoffs", () => {
+  const original = {
+    id: "task-canonical-30",
+    provider: "chatgpt",
+    tabId: 12,
+    providerUrl: "https://chatgpt.com/c/first",
+    providerConversationId: "conversation-first",
+    stageLedger: {
+      "24": { number: 24, total: 30, status: "passed", attemptCount: 1 }
+    },
+    actionHistory: [{ action: "terminal.execute", result: { ok: true } }]
+  };
+
+  const second = applyChatGPTHandoff(original, {
+    ok: true,
+    handedOff: true,
+    contextWindowFullObserved: true,
+    triggerReason: "chatgpt-context-window-full",
+    fromUrl: "https://chatgpt.com/c/first",
+    toUrl: "https://chatgpt.com/c/second",
+    fromConversationId: "conversation-first",
+    toConversationId: "conversation-second",
+    url: "https://chatgpt.com/c/second",
+    conversationId: "conversation-second",
+    continuationMarker: false,
+    verification: "context-window-trigger-and-conversation-id-change"
+  }, "2026-11-26T12:00:00.000Z");
+
+  const third = applyChatGPTHandoff(second, {
+    ok: true,
+    handedOff: true,
+    contextWindowFullObserved: true,
+    triggerReason: "chatgpt-context-window-full",
+    fromUrl: "https://chatgpt.com/c/second",
+    toUrl: "https://chatgpt.com/c/third",
+    fromConversationId: "conversation-second",
+    toConversationId: "conversation-third",
+    url: "https://chatgpt.com/c/third",
+    conversationId: "conversation-third",
+    continuationMarker: false,
+    verification: "context-window-trigger-and-conversation-id-change"
+  }, "2026-11-26T13:00:00.000Z");
+
+  assert.equal(second.id, original.id);
+  assert.equal(third.id, original.id);
+  assert.equal(third.providerConversationId, "conversation-third");
+  assert.equal(third.handoffEvents.length, 2);
+  assert.deepEqual(third.handoffEvents.map(event => event.taskId), [
+    "task-canonical-30",
+    "task-canonical-30"
+  ]);
+  assert.deepEqual(third.stageLedger, original.stageLedger);
+  assert.deepEqual(third.actionHistory, original.actionHistory);
+});
