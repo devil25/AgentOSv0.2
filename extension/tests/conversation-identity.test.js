@@ -247,6 +247,9 @@ test("accepts only a continuation bound to the same task and its verified handof
     state, "https://chatgpt.com/c/local-chatgpt:migrated", null, true
   ), true);
   assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/unrelated-standard-route", null, true
+  ), false);
+  assert.equal(isVerifiedChatGPTContinuation(
     state, "https://chatgpt.com/c/local-chatgpt:other", "conversation-other", false
   ), false);
   assert.equal(isVerifiedChatGPTContinuation(
