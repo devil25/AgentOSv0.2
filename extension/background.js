@@ -7,8 +7,7 @@ const {
   chatGPTConversationIdentityMatches,
   sameConversation,
   isChatGPTContinuationUrl,
-  applyChatGPTHandoff,
-  isManualChatGPTHandoff
+  applyChatGPTHandoff
 } = conversationIdentity;
 const taskContinuation = globalThis.AgentOSTaskContinuation;
 if (!taskContinuation) {
@@ -832,40 +831,6 @@ async function checkAwaitingModelResponse() {
       return { ok: true, checked: true, reason: "provider-mismatch", state };
     }
 
-    // An explicit user click on ChatGPT's New chat button is a deliberate
-    // handoff request. Attach the saved task to the verified new conversation
-    // and resend the persisted continuation prompt exactly once.
-    if (state.provider === "chatgpt" && state.manualHandoffPending &&
-        isManualChatGPTHandoff(state, info.provider, info.url, info.conversationId)) {
-      const pending = state.manualHandoffPending;
-      const adopted = await writeTaskState({
-        ...state,
-        providerUrl: info.url,
-        providerConversationId: info.conversationId || null,
-        manualHandoffPending: null,
-        error: null,
-        conversationTransfer: {
-          ...(state.conversationTransfer || {}),
-          from: pending.fromUrl || state.providerUrl,
-          to: info.url,
-          fromConversationId: pending.fromConversationId || state.providerConversationId || null,
-          toConversationId: info.conversationId || null,
-          at: new Date().toISOString(),
-          method: "chatgpt-user-clicked-new-chat"
-        }
-      });
-      const prompt = buildContinuationPrompt(adopted);
-      const checkpoint = await writeTaskState({
-        ...adopted, phase: "action_completed", prompt,
-        response: null, action: null, finalResponse: null
-      });
-      await sendPrompt(checkpoint, prompt);
-      return {
-        ok: true, checked: true, reason: "manual-handoff-resumed",
-        state: await readTaskState()
-      };
-    }
-
     if (info.generationInProgress === true) {
       return { ok: true, checked: true, reason: "generation-in-progress", state };
     }
@@ -1050,22 +1015,6 @@ api.action.onClicked.addListener(async () => {
 });
 api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_NATIVE_REQUEST") return nativeRequest(message.payload);
-  if (message?.type === "AGENTOS_CHATGPT_NEW_CHAT_CLICKED" && sender.tab?.id) {
-    return (async () => {
-      const state = await readTaskState();
-      if (!state || state.tabId !== sender.tab.id || state.provider !== "chatgpt" ||
-          state.phase !== "awaiting_model" || state.action || await isStopped()) {
-        return { ok: true, tracked: false, reason: "no-awaiting-chatgpt-task" };
-      }
-      const pending = {
-        fromUrl: state.providerUrl,
-        fromConversationId: state.providerConversationId || message.fromConversationId || null,
-        clickedAt: message.clickedAt || new Date().toISOString()
-      };
-      await writeTaskState({ ...state, manualHandoffPending: pending });
-      return { ok: true, tracked: true, taskId: state.id };
-    })();
-  }
   if (message?.type === "AGENTOS_TASK_STATE_GET") return taskStateForActiveTab().then(state => ({ ok: true, state }));
   if (message?.type === "AGENTOS_TASK_STATE_SET") return writeTaskState(message.state).then(state => ({ ok: true, state }));
   if (message?.type === "AGENTOS_TASK_CHECK_RESPONSE") return checkAwaitingModelResponse();
