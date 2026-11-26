@@ -22,6 +22,7 @@
   "background": {
     "scripts": [
       "conversation-identity.js",
+      "task-continuation.js",
       "action-parser.js",
       "background.js"
     ]
