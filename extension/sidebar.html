@@ -28,7 +28,7 @@
     <section id="panel-agent" class="panel active">
       <div class="card status-card">
         <div class="section-heading"><div><div class="eyebrow">LOCAL RUNTIME</div><div id="runtimeText" class="status-copy">Checking connection…</div></div><span id="runtimeBadge" class="badge warn">CHECKING</span></div>
-        <div class="row"><button id="connectBtn" class="btn primary">Test connection</button><button id="stopBtn" class="btn danger">Stop agent</button></div>
+        <div class="row"><button id="connectBtn" class="btn primary">Test connection</button><button id="stopBtn" class="btn danger">Stop agent</button></div><p class="muted hint">Stop prevents the next agent step. A PowerShell command already running is allowed to finish first.</p>
       </div>
 
       <div class="card">
@@ -107,7 +107,7 @@ Waiting for terminal.execute…</pre>
         <div id="activityTimeline" class="timeline"><div class="timeline-empty">Activity will appear here when a task starts.</div></div>
       </div>
 
-      <p class="activity-note">Live output is streamed from the local Windows runtime. The agent continues working if this sidebar is closed; reopen Activity to review the saved task timeline and latest result.</p>
+      <p class="activity-note">Live output is streamed from the local Windows runtime. Stop takes effect after the current action finishes; it does not forcibly terminate an in-flight command. The agent continues working if this sidebar is closed.</p>
     </section>
 
     <section id="panel-skills" class="panel">
