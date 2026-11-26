@@ -61,7 +61,7 @@
   }
   function requiresAgentAction(state) {
     const task = String(state?.task || "");
-    return /terminal\\.execute|workspace\\.(?:list|read_file|create_file)|powershell|power\\s*shell|execute\\s+(?:the\\s+)?(?:command|steps|stages)|run\\s+(?:the\\s+)?(?:\\d+|[a-z]+)\\s+stages|hand.?off.*(?:test|regression)|(?:stage|step)\\s*0*1\\s*\\/\\s*\\d+/i.test(task);
+    return /terminal\.execute|workspace\.(?:list|read_file|create_file)|powershell|power\s*shell|execute\s+(?:the\s+)?(?:command|steps|stages)|run\s+(?:the\s+)?(?:\d+|[a-z]+)\s+stages|hand.?off.*(?:test|regression)|(?:stage|step)\s*0*1\s*\/\s*\d+/i.test(task);
   }
 
   function buildNonActionRetryPrompt(state, previousResponse) {
@@ -74,7 +74,7 @@
       buildContinuationPrompt(state),
       "PREVIOUS NON-ACTION RESPONSE (for diagnosis only; it was not executed):",
       prior
-    ].join("\\n\\n");
+    ].join("\n\n");
   }
 
   const api = Object.freeze({
