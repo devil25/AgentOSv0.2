@@ -74,3 +74,13 @@ test("recognizes specific active-generation controls without false-positive Stop
   assert.equal(isGenerationControlLabel("Stop sharing"), false);
   assert.equal(isGenerationControlLabel("Submit"), false);
 });
+
+
+test("requires a genuinely new ChatGPT DOM identity after a context-window handoff", () => {
+  const { isChatGPTContinuationReady } = require("../provider-adapters.js");
+  assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-old", false), false);
+  assert.equal(isChatGPTContinuationReady("conversation-old", "conversation-new", false), true);
+  assert.equal(isChatGPTContinuationReady(null, "conversation-new", false), true);
+  assert.equal(isChatGPTContinuationReady(null, null, true), true);
+  assert.equal(isChatGPTContinuationReady("conversation-old", null, true), false);
+});
