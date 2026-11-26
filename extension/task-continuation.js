@@ -59,7 +59,29 @@
       JSON.stringify(fallbackResult, null, 2)
     ].join("\n\n");
   }
-  const api = Object.freeze({ buildContinuationPrompt });
+  function requiresAgentAction(state) {
+    const task = String(state?.task || "");
+    return /terminal\\.execute|workspace\\.(?:list|read_file|create_file)|powershell|power\\s*shell|execute\\s+(?:the\\s+)?(?:command|steps|stages)|run\\s+(?:the\\s+)?(?:\\d+|[a-z]+)\\s+stages|hand.?off.*(?:test|regression)|(?:stage|step)\\s*0*1\\s*\\/\\s*\\d+/i.test(task);
+  }
+
+  function buildNonActionRetryPrompt(state, previousResponse) {
+    const prior = clipped(previousResponse, 1200);
+    return [
+      "AGENTOS ACTION PROTOCOL RECOVERY — ONE RETRY",
+      "Your previous response did not contain a valid AgentOS action envelope. AgentOS has not executed any action for this task yet. Do not claim that the task is complete and do not provide a plan or ordinary prose.",
+      "Re-read the complete original AgentOS instructions and user task below. Begin the task now by emitting exactly ONE valid fenced JSON action envelope. Use terminal.execute for the requested PowerShell inspection. Do not combine multiple stages in one command.",
+      "The next message must contain the action envelope only.",
+      buildContinuationPrompt(state),
+      "PREVIOUS NON-ACTION RESPONSE (for diagnosis only; it was not executed):",
+      prior
+    ].join("\\n\\n");
+  }
+
+  const api = Object.freeze({
+    buildContinuationPrompt,
+    requiresAgentAction,
+    buildNonActionRetryPrompt
+  });
   globalThis.AgentOSTaskContinuation = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();
