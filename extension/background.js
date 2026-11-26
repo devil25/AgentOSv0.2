@@ -349,6 +349,9 @@ async function sendPrompt(state, prompt) {
         state = await writeTaskState(
           applyChatGPTHandoff(state, handoff)
         );
+        // Rebuild only after the provider confirms the context-window handoff,
+        // so the newly persisted event and stable task ID travel into the new chat.
+        prompt = buildContinuationPrompt(state, state.lastResult || null);
       } else if (handoff?.ok === false) {
         throw new Error(handoff.error || "ChatGPT conversation handoff failed.");
       }

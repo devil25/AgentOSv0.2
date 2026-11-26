@@ -14,9 +14,17 @@ test("continuation in a new conversation repeats the complete original AgentOS p
     result: { ok: true, returncode: 0, stdout: "STAGE_02_PASS" }
   };
   const state = {
+    id: "task-stable-25",
     task: "Run all 25 stages.",
     initialPrompt: "AGENTOS_SYSTEM_RULES_UNIQUE\nUSER TASK: run all 25 stages.",
     steps: 2,
+    stageLedger: { "1": { number: 1, total: 25, status: "passed" } },
+    handoffEvents: [{
+      taskId: "task-stable-25",
+      triggerReason: "chatgpt-context-window-full",
+      fromConversationId: "old-chat",
+      toConversationId: "new-chat"
+    }],
     actionHistory: [first, latest]
   };
 
@@ -27,6 +35,11 @@ test("continuation in a new conversation repeats the complete original AgentOS p
   assert.match(prompt, /STAGE_01_PASS/);
   assert.match(prompt, /STAGE_02_PASS/);
   assert.match(prompt, /first stage that has not succeeded/);
+  assert.match(prompt, /task-stable-25/);
+  assert.match(prompt, /PERSISTED STAGE LEDGER/);
+  assert.match(prompt, /AUTOMATIC CONTEXT HANDOFF EVENT LEDGER/);
+  assert.match(prompt, /old-chat/);
+  assert.match(prompt, /new-chat/);
 });
 
 test("legacy saved tasks still receive an explicit AgentOS action protocol", () => {
@@ -176,7 +189,7 @@ test("a failed final-stage ledger entry overrides legacy-looking pass text", () 
   const { requiresUnfinishedStagedTask } = require("../task-continuation.js");
   const state = {
     task: "Run all 25 stages.",
-    stageLedger: { "25": { number: 25, status: "failed" } },
+    stageLedger: { "25": { number: 25, total: 25, status: "failed" } },
     actionHistory: [{
       action: "terminal.execute",
       arguments: { command: "Write-Output 'HANDOFF_STAGE=25/25'; Write-Output 'STAGE_25_PASS'" },
