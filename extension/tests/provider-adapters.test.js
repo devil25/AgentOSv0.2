@@ -112,3 +112,13 @@ test("recognizes ChatGPT stop-button test identifiers without matching unrelated
   assert.equal(isGenerationControlLabel("stop_generating_button"), true);
   assert.equal(isGenerationControlLabel("Stop sharing"), false);
 });
+
+
+test("recognizes the explicit ChatGPT New chat control without matching longer labels", () => {
+  const { isChatGPTNewChatButtonLabel } = require("../provider-adapters.js");
+  assert.equal(isChatGPTNewChatButtonLabel("New chat"), true);
+  assert.equal(isChatGPTNewChatButtonLabel("NEW CHAT"), true);
+  assert.equal(isChatGPTNewChatButtonLabel("New chat Ctrl Shift O"), true);
+  assert.equal(isChatGPTNewChatButtonLabel("Share chat"), false);
+  assert.equal(isChatGPTNewChatButtonLabel("Chat history"), false);
+});
