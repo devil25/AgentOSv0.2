@@ -282,7 +282,9 @@
   }
 
   const api = Object.freeze({
-    buildTaskRunContext,\n    buildInitialTaskPrompt,\n    buildContinuationPrompt,
+    buildTaskRunContext,
+    buildInitialTaskPrompt,
+    buildContinuationPrompt,
     requiresAgentAction,
     requiresUnfinishedStagedTask,
     nextNonActionRetryCount,
