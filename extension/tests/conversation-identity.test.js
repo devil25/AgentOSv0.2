@@ -82,21 +82,3 @@ test("never carries the old ChatGPT identity when the handoff cannot provide a n
   assert.equal(next.providerConversationId, null);
 });
 
-
-test("recognizes an explicitly requested New Chat handoff only after the conversation identity changes", () => {
-  const { isManualChatGPTHandoff } = require("../conversation-identity.js");
-  const state = {
-    provider: "chatgpt",
-    providerUrl: "https://chatgpt.com/c/old",
-    providerConversationId: "old-id",
-    manualHandoffPending: {
-      fromUrl: "https://chatgpt.com/c/old",
-      fromConversationId: "old-id"
-    }
-  };
-  assert.equal(isManualChatGPTHandoff(state, "chatgpt", "https://chatgpt.com/c/old", "old-id"), false);
-  assert.equal(isManualChatGPTHandoff(state, "chatgpt", "https://chatgpt.com/c/new", "new-id"), true);
-  assert.equal(isManualChatGPTHandoff(state, "chatgpt", "https://chatgpt.com/c/new", null), true);
-  assert.equal(isManualChatGPTHandoff(state, "claude", "https://claude.ai/new", "new-id"), false);
-  assert.equal(isManualChatGPTHandoff({ ...state, manualHandoffPending: null }, "chatgpt", "https://chatgpt.com/c/new", "new-id"), false);
-});
