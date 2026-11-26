@@ -123,7 +123,7 @@ test("stage ledger keeps a failed attempt retryable, then blocks a repeated succ
   state.stageLedger = recordStageResult(state, {
     ...action, result: {
       ok: true, returncode: 0,
-      stdout: "HANDOFF_STAGE=24/25\\nSTAGE_24_PASS", stderr: ""
+      stdout: "HANDOFF_STAGE=24/25\nSTAGE_24_PASS", stderr: ""
     }
   }, "2026-11-26T10:00:03.000Z");
   assert.equal(state.stageLedger["24"].status, "passed");
@@ -140,7 +140,7 @@ test("stage ledger does not pass a command without its current execution pass ma
   let state = { stageLedger: {} };
   state.stageLedger = beginStageAttempt(state, action);
   state.stageLedger = recordStageResult(state, {
-    ...action, result: { ok: true, returncode: 0, stdout: "An old log says STAGE_07_PASS\\n", stderr: "" }
+    ...action, result: { ok: true, returncode: 0, stdout: "An old log says STAGE_07_PASS", stderr: "" }
   });
   assert.equal(state.stageLedger["7"].status, "failed");
   assert.equal(state.stageLedger["7"].resultEvidence, "missing-stage-pass-marker");
