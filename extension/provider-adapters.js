@@ -56,6 +56,13 @@
     return ids.length === 1 ? ids[0] : null;
   }
 
+  function isChatGPTContinuationReady(beforeId, currentId, continuationMarker = false) {
+    const before = typeof beforeId === "string" ? beforeId.trim() : "";
+    const current = typeof currentId === "string" ? currentId.trim() : "";
+    if (before) return Boolean(current && current !== before);
+    return Boolean(current || continuationMarker === true);
+  }
+
   // Do not mistake unrelated page buttons named "Stop" for a live generation
   // control. Providers expose the active-generation state with more specific labels.
   function isGenerationControlLabel(value) {
@@ -72,6 +79,7 @@
       CHATGPT_CONVERSATION_ID_SELECTOR,
       resolveChatGPTMessageId,
       resolveChatGPTConversationId,
+      isChatGPTContinuationReady,
       isGenerationControlLabel
     });
     return;
@@ -431,9 +439,11 @@
         })
       );
       const currentConversationId = getChatGPTConversationId();
-      const identityReady = beforeConversationId
-        ? Boolean(currentConversationId && currentConversationId !== beforeConversationId)
-        : Boolean(currentConversationId || hasChatGPTContinuationMarker());
+      const identityReady = isChatGPTContinuationReady(
+        beforeConversationId,
+        currentConversationId,
+        hasChatGPTContinuationMarker()
+      );
       if (location.href !== beforeUrl && composer && !modalStillOpen && identityReady) {
         return {
           ok: true,
