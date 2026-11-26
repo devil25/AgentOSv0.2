@@ -31,7 +31,7 @@ function redactActivityText(value) {
     .replace(/(authorization\s*[:=]\s*["']?Bearer\s+)[A-Za-z0-9._~+\/-]+/gi, "$1[REDACTED]")
     .replace(/(bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi, "$1[REDACTED]")
     .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret)(\s*[:=]\s*["']?)[^\s,"']+/gi, "$1$2[REDACTED]")
-    .slice(0, 5000);
+    .slice(0, 2500);
 }
 
 function activityForState(state, previous) {
@@ -87,7 +87,7 @@ function activityForState(state, previous) {
     entry.message = redactActivityText(state.finalResponse || "").slice(0, 1200);
   }
   activity.push(entry);
-  return activity.slice(-60);
+  return activity.slice(-40);
 }
 
 async function writeTaskState(state) {
