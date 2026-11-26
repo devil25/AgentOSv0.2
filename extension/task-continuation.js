@@ -86,7 +86,7 @@
     if (action?.action !== "terminal.execute") return null;
     const command = action?.arguments?.command;
     if (typeof command !== "string") return null;
-    const match = command.match(/HANDOFF_STAGE\\s*=\\s*(\\d{1,3})\\s*\\/\\s*(\\d{1,3})/i);
+    const match = command.match(/HANDOFF_STAGE\s*=\s*(\d{1,3})\s*\/\s*(\d{1,3})/i);
     if (!match) return null;
     const number = Number(match[1]);
     const total = Number(match[2]);

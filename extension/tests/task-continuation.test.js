@@ -123,7 +123,7 @@ test("stage ledger keeps a failed attempt retryable, then blocks a repeated succ
   state.stageLedger = recordStageResult(state, {
     ...action, result: {
       ok: true, returncode: 0,
-      stdout: "HANDOFF_STAGE=24/25\nSTAGE_24_PASS", stderr: ""
+      stdout: "HANDOFF_STAGE=24/25\\nSTAGE_24_PASS", stderr: ""
     }
   }, "2026-11-26T10:00:03.000Z");
   assert.equal(state.stageLedger["24"].status, "passed");
