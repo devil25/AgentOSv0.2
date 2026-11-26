@@ -240,7 +240,7 @@ async function nativeRequest(payload) {
 async function tabRequest(tabId, type, extra = {}) {
   if (!Number.isInteger(tabId)) throw new Error("The AI website tab is no longer available.");
   const timeoutMs = type === "AGENTOS_PROVIDER_HANDOFF" ? 35000
-    : type === "AGENTOS_PROVIDER_SUBMIT" ? 16000
+    : type === "AGENTOS_PROVIDER_SUBMIT" ? 30000
     : type === "AGENTOS_PROVIDER_READ" ? 12000
     : 10000;
 
@@ -632,6 +632,31 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
       state.conversationTransfer?.to === state.providerUrl &&
       !state.action && !state.response) {
     state = await writeTaskState({ ...state, phase: "awaiting_model", error: null });
+  }
+
+  // A send click can be accepted by ChatGPT even when its DOM confirmation
+  // arrives late. If a genuinely new assistant message is observed against
+  // the saved pre-submit baseline, safely re-arm this task and process it.
+  const ambiguousSubmitResult = state?.phase === "error" &&
+    state.promptSubmissionStage === "submitting the prompt" &&
+    /could not verify that ChatGPT accepted the prompt|did not confirm submission/i.test(state.error || "") &&
+    !state.action && !state.response &&
+    Array.isArray(state.baseline);
+  if (state?.tabId === tabId && ambiguousSubmitResult) {
+    const possibleResponse = responseDelta(
+      messages,
+      state.baseline || [],
+      messageIds,
+      state.baselineMessageIds || []
+    );
+    if (possibleResponse) {
+      state = await writeTaskState({
+        ...state,
+        phase: "awaiting_model",
+        error: null,
+        promptSubmissionStage: "submitted-unconfirmed"
+      });
+    }
   }
   if (!state || state.tabId !== tabId) {
     return { ok: true, accepted: true, reason: "no-task-for-tab" };
