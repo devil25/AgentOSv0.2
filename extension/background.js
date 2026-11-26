@@ -6,7 +6,6 @@ if (!conversationIdentity) {
 const {
   chatGPTConversationIdentityMatches,
   sameConversation,
-  isChatGPTContinuationUrl,
   isVerifiedChatGPTContinuation,
   applyChatGPTHandoff
 } = conversationIdentity;
