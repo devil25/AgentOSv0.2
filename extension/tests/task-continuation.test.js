@@ -87,14 +87,14 @@ test("keeps a numbered multi-stage task incomplete until its final stage succeed
     actionHistory: [{
       action: "terminal.execute",
       arguments: { command: "Write-Output 'HANDOFF_STAGE=09/25'; Write-Output 'STAGE_09_PASS'" },
-      result: { ok: true, stdout: "HANDOFF_STAGE=09/25\\nSTAGE_09_PASS" }
+      result: { ok: true, stdout: "HANDOFF_STAGE=09/25\nSTAGE_09_PASS" }
     }]
   };
   assert.equal(requiresUnfinishedStagedTask(state), true);
   state.actionHistory.push({
     action: "terminal.execute",
     arguments: { command: "Write-Output 'HANDOFF_STAGE=25/25'; Write-Output 'STAGE_25_PASS'" },
-    result: { ok: true, stdout: "HANDOFF_STAGE=25/25\\nSTAGE_25_PASS" }
+    result: { ok: true, stdout: "HANDOFF_STAGE=25/25\nSTAGE_25_PASS" }
   });
   assert.equal(requiresUnfinishedStagedTask(state), false);
 });
