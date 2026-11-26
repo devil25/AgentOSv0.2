@@ -333,6 +333,31 @@ async function decideAction(approved) {
     $("rejectActionBtn").disabled = false;
   }
 }
+async function checkAIResponseNow() {
+  $("checkAIResponseBtn").disabled = true;
+  $("checkAIResponseBtn").textContent = "Checking AI response…";
+  try {
+    const result = await api.runtime.sendMessage({ type: "AGENTOS_TASK_CHECK_RESPONSE" });
+    if (!result?.ok) throw new Error(result?.error || "Could not check the AI response.");
+    if (result.state) renderTaskState(result.state);
+    if (result.reason === "generation-in-progress") {
+      out("The AI website is still generating. AgentOS will check again automatically.");
+    } else if (result.reason === "no-new-response") {
+      out("No new assistant response was found in the original AI conversation yet.");
+    } else if (result.reason === "provider-mismatch") {
+      out("The original task belongs to a different AI provider. Return to the original conversation tab.");
+    } else if (result.reason === "task-not-awaiting-model") {
+      out({ status: result.state?.phase || "idle", note: "The task is no longer waiting for a model response." });
+    } else {
+      out({ ok: true, responseCheck: result.reason || "completed", taskPhase: result.state?.phase || "unknown" });
+    }
+  } catch (error) {
+    out({ ok: false, error: String(error.message || error) });
+  } finally {
+    $("checkAIResponseBtn").disabled = false;
+    $("checkAIResponseBtn").textContent = "Check AI response now";
+  }
+}
 async function permanentlyStopTask() {
   if (!confirm("Permanently stop this task? It will not be resumed. A currently running action will finish safely, then the task will be marked cancelled.")) return;
   $("permanentStopBtn").disabled = true;
@@ -415,6 +440,7 @@ $("providerCheckBtn").addEventListener("click", providerCheck);
 $("sendTaskBtn").addEventListener("click", sendTask);
 $("resumeTaskBtn").addEventListener("click", resumeTask);
 $("permanentStopBtn").addEventListener("click", permanentlyStopTask);
+$("checkAIResponseBtn").addEventListener("click", checkAIResponseNow);
 $("clearTaskHistoryBtn").addEventListener("click", clearTaskHistory);
 $("readResponseBtn").addEventListener("click", async () => {
   const result = await api.runtime.sendMessage({ type: "AGENTOS_PROVIDER_READ" });
