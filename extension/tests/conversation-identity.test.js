@@ -280,3 +280,25 @@ test("requires the handoff ledger and transfer metadata to agree", () => {
     "https://chatgpt.com/c/new", null, false
   ), false);
 });
+
+test("rejects a conflicting DOM identity even when a continuation marker is present", () => {
+  const { isVerifiedChatGPTContinuation } = require("../conversation-identity.js");
+  const state = {
+    id: "task-safe-4", provider: "chatgpt", phase: "awaiting_model",
+    handoffEvents: [{
+      provider: "chatgpt", taskId: "task-safe-4",
+      triggerReason: "chatgpt-context-window-full",
+      toUrl: "https://chatgpt.com/c/new",
+      toConversationId: "conversation-new"
+    }],
+    conversationTransfer: {
+      method: "chatgpt-context-window-new-chat",
+      triggerReason: "chatgpt-context-window-full",
+      to: "https://chatgpt.com/c/new",
+      toConversationId: "conversation-new"
+    }
+  };
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/local-chatgpt:other", "conversation-other", true
+  ), false);
+});
