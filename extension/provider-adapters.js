@@ -36,6 +36,20 @@
     '[data-content-search-unit-key$=":assistant"]',
     '[data-markdown-text-style="assistant-message"]',
   ]);
+  const CHATGPT_USER_SELECTORS = Object.freeze([
+    '[data-message-author-role="user"]',
+    '[data-role="user"]',
+    '[data-author="user"]',
+    '[data-message-role="user"]',
+    '[data-author-role="user"]',
+    '[data-turn-role="user"]',
+    '[data-message-author="user"]',
+    '[data-conversation-role="user"]',
+    '[data-turn="user"]',
+    '[data-testid^="conversation-turn-"][data-turn="user"]',
+    '[data-test-id^="conversation-turn-"][data-turn="user"]',
+    'section[data-turn="user"]'
+  ]);
   const CHATGPT_RESPONSE_BODY_SELECTOR = "[data-response-body]";
   const CHATGPT_MESSAGE_OWNER_SELECTOR = "[data-chatgpt-selection-message-id]";
   const CHATGPT_MESSAGE_SOURCE_SELECTOR = "[data-dil-source-message-id]";
@@ -66,13 +80,38 @@
   // Do not mistake unrelated page buttons named "Stop" for a live generation
   // control. Providers expose the active-generation state with more specific labels.
   function isGenerationControlLabel(value) {
-    return /stop generating|stop response|cancel response|stop generation|إيقاف التوليد|إيقاف الاستجابة/i.test(String(value || ""));
+    return /stop\\s*(?:generating|response|generation|streaming)|stop[-_](?:generating|response|generation|button)|cancel\\s*(?:response|generation)|cancel[-_](?:response|generation)|إيقاف\\s*(?:التوليد|الاستجابة)/i.test(String(value || ""));
+  }
+
+  function normalizeMessageText(value) {
+    return String(value || "").replace(/\\s+/g, " ").trim().toLowerCase();
+  }
+
+  function hasNewUserMessage(currentMessages, baselineMessages, submittedText) {
+    const promptPrefix = normalizeMessageText(submittedText).slice(0, 80);
+    if (promptPrefix.length < 12 || !Array.isArray(currentMessages)) return false;
+
+    const baselineCounts = new Map();
+    for (const message of Array.isArray(baselineMessages) ? baselineMessages : []) {
+      const normalized = normalizeMessageText(message);
+      if (normalized) baselineCounts.set(normalized, (baselineCounts.get(normalized) || 0) + 1);
+    }
+
+    for (const message of currentMessages) {
+      const normalized = normalizeMessageText(message);
+      if (!normalized || !normalized.includes(promptPrefix)) continue;
+      const count = baselineCounts.get(normalized) || 0;
+      if (count > 0) baselineCounts.set(normalized, count - 1);
+      else return true;
+    }
+    return false;
   }
 
   // Export the selector/identity contract for Node tests without executing browser code.
   if (typeof module !== "undefined" && module.exports && typeof document === "undefined") {
     module.exports = Object.freeze({
       CHATGPT_ASSISTANT_SELECTORS,
+      CHATGPT_USER_SELECTORS,
       CHATGPT_RESPONSE_BODY_SELECTOR,
       CHATGPT_MESSAGE_OWNER_SELECTOR,
       CHATGPT_MESSAGE_SOURCE_SELECTOR,
@@ -80,7 +119,8 @@
       resolveChatGPTMessageId,
       resolveChatGPTConversationId,
       isChatGPTContinuationReady,
-      isGenerationControlLabel
+      isGenerationControlLabel,
+      hasNewUserMessage
     });
     return;
   }
@@ -163,6 +203,22 @@
       result.push(row);
     }
     return result;
+  }
+
+  function readUserMessages(composer) {
+    const selectors = provider?.id === "chatgpt"
+      ? CHATGPT_USER_SELECTORS
+      : [
+          '[data-message-author-role="user"]',
+          '[data-role="user"]',
+          '[data-author="user"]',
+          '[data-message-role="user"]'
+        ];
+    const nodes = selectors.flatMap(selector => {
+      try { return [...document.querySelectorAll(selector)]; }
+      catch (_) { return []; }
+    });
+    return compactCandidates(nodes, composer).map(row => row.text);
   }
 
   function readChatGPTAssistantEntries(composer) {
@@ -498,6 +554,7 @@
     const beforeText = (composer.innerText || composer.value || composer.textContent || "").trim();
     if (!beforeText) throw new Error("The message composer is empty; AgentOS will not submit an empty prompt.");
     const beforeMessages = JSON.stringify(readAssistantResponse().messages);
+    const beforeUserMessages = readUserMessages(composer);
     const button = findSendButton(composer);
     let method = "send-button";
     if (button) {
@@ -510,18 +567,38 @@
       }));
     }
 
-    // A click is not proof that the provider accepted the prompt. Confirm that
-    // generation started, the editor cleared, or a new assistant turn appeared.
-    const deadline = Date.now() + 10000;
+    // ChatGPT may replace its ProseMirror composer after accepting a message.
+    // Re-query the live editor instead of reading a stale detached DOM node.
+    // A newly rendered user turn confirms acceptance without waiting for the
+    // assistant to finish generating a response.
+    const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 200));
-      const currentText = (composer.innerText || composer.value || composer.textContent || "").trim();
+      const currentComposer = findComposer();
+      const currentText = currentComposer
+        ? (currentComposer.innerText || currentComposer.value || currentComposer.textContent || "").trim()
+        : null;
       const messagesChanged = JSON.stringify(readAssistantResponse().messages) !== beforeMessages;
-      if (generationInProgress() || !currentText || messagesChanged) {
-        return { ok: true, submitted: true, verified: true, method };
+      const newUserTurn = hasNewUserMessage(
+        readUserMessages(currentComposer || composer),
+        beforeUserMessages,
+        beforeText
+      );
+      const composerCleared = currentComposer !== null && currentText === "";
+      const generationActive = generationInProgress();
+      if (generationActive || composerCleared || newUserTurn || messagesChanged) {
+        return {
+          ok: true,
+          submitted: true,
+          verified: true,
+          method,
+          confirmation: generationActive ? "generation-control" :
+            composerCleared ? "composer-cleared" :
+            newUserTurn ? "new-user-message" : "assistant-message-changed"
+        };
       }
     }
-    throw new Error("The Send control was activated, but the AI website did not confirm submission within 10 seconds. The prompt was not resent.");
+    throw new Error("The Send control was activated, but AgentOS could not verify that ChatGPT accepted the prompt within 20 seconds. The prompt may already be present in the conversation; it was not resent. Inspect the conversation before retrying.");
   }
 
   // Observe the provider page independently of the sidebar lifetime. A quiet,
@@ -533,10 +610,15 @@
   function generationInProgress() {
     const controls = [...document.querySelectorAll("button, [role='button']")];
     return controls.some(button => {
-      if (!visible(button)) return false;
+      if (!button?.isConnected) return false;
+      const style = getComputedStyle(button);
+      const rect = button.getBoundingClientRect();
+      if (style.visibility === "hidden" || style.display === "none" ||
+          rect.width <= 0 || rect.height <= 0) return false;
       const label = [
         button.innerText, button.getAttribute("aria-label"),
-        button.getAttribute("data-testid"), button.title
+        button.getAttribute("data-testid"), button.getAttribute("data-test-id"),
+        button.title
       ].join(" ");
       return isGenerationControlLabel(label);
     });
