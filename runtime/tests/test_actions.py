@@ -25,6 +25,16 @@ class FakePipe:
             return ""
 
 
+class ContinuousPipe:
+    def __init__(self, stop_event):
+        self.stop_event = stop_event
+
+    def readline(self):
+        if self.stop_event.wait(timeout=0.001):
+            return ""
+        return "continuous output\\n"
+
+
 class FakeProcess:
     def __init__(self, stdout=("ok\n",), stderr=(), returncode=0, blocking=False):
         self._returncode = returncode
@@ -186,6 +196,20 @@ class ActionTests(unittest.TestCase):
         self.assertIsNone(result["returncode"])
         self.assertEqual(result["stdout"], "partial stdout\n")
         self.assertEqual(result["stderr"], "partial stderr\n")
+
+    def test_terminal_timeout_is_enforced_during_continuous_output(self):
+        process = FakeProcess(stdout=(), stderr=(), returncode=None, blocking=True)
+        process.stdout = ContinuousPipe(process._event)
+        process.stderr = ContinuousPipe(process._event)
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {
+                "command": "continuous-output",
+                "timeout_seconds": 1
+            })
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertIsNone(result["returncode"])
+        self.assertTrue(result["stdout"])
 
     def test_terminal_execute_accepts_timeout_up_to_600_seconds(self):
         process = FakeProcess(stdout=("ok\n",))
