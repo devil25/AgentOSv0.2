@@ -142,6 +142,17 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "terminal.finished")
         self.assertEqual(events[-1]["returncode"], 0)
 
+    def test_terminal_output_events_are_chunked_for_native_messaging(self):
+        process = FakeProcess(stdout=("x" * 9500,))
+        events = []
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {"command": "Write-Output test"}, emit=events.append)
+        chunks = [event["text"] for event in events if event["type"] == "terminal.output"]
+        self.assertTrue(result["ok"])
+        self.assertGreaterEqual(len(chunks), 3)
+        self.assertLessEqual(max(map(len, chunks)), 4000)
+        self.assertEqual("".join(chunks), "x" * 9500)
+
     def test_native_action_handler_forwards_terminal_events(self):
         process = FakeProcess(stdout=("native host stream\\n",))
         events = []
