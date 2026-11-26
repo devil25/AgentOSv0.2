@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import threading
@@ -210,6 +211,35 @@ class ActionTests(unittest.TestCase):
         self.assertTrue(result["timed_out"])
         self.assertIsNone(result["returncode"])
         self.assertTrue(result["stdout"])
+
+    @unittest.skipUnless(os.name == "nt", "PowerShell streaming integration test requires Windows")
+    def test_windows_powershell_streaming_integration(self):
+        events = []
+        result = execute(
+            "terminal.execute",
+            {
+                "command": "Write-Output 'agentos-stream-one'; Start-Sleep -Milliseconds 250; Write-Output 'agentos-stream-two'",
+                "timeout_seconds": 10,
+            },
+            emit=events.append,
+        )
+        self.assertTrue(result["ok"], result.get("stderr"))
+        self.assertIn("agentos-stream-one", result["stdout"])
+        self.assertIn("agentos-stream-two", result["stdout"])
+        output_events = [event for event in events if event["type"] == "terminal.output"]
+        self.assertTrue(output_events)
+        self.assertEqual(events[0]["type"], "terminal.started")
+        self.assertEqual(events[-1]["type"], "terminal.finished")
+
+    @unittest.skipUnless(os.name == "nt", "PowerShell timeout integration test requires Windows")
+    def test_windows_powershell_timeout_integration(self):
+        result = execute(
+            "terminal.execute",
+            {"command": "Start-Sleep -Seconds 5", "timeout_seconds": 1},
+        )
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertIsNone(result["returncode"])
 
     def test_terminal_execute_accepts_timeout_up_to_600_seconds(self):
         process = FakeProcess(stdout=("ok\n",))
