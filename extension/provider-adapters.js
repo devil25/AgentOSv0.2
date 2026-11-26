@@ -56,6 +56,12 @@
     return ids.length === 1 ? ids[0] : null;
   }
 
+  // Do not mistake unrelated page buttons named "Stop" for a live generation
+  // control. Providers expose the active-generation state with more specific labels.
+  function isGenerationControlLabel(value) {
+    return /stop generating|stop response|cancel response|stop generation|إيقاف التوليد|إيقاف الاستجابة/i.test(String(value || ""));
+  }
+
   // Export the selector/identity contract for Node tests without executing browser code.
   if (typeof module !== "undefined" && module.exports && typeof document === "undefined") {
     module.exports = Object.freeze({
@@ -65,7 +71,8 @@
       CHATGPT_MESSAGE_SOURCE_SELECTOR,
       CHATGPT_CONVERSATION_ID_SELECTOR,
       resolveChatGPTMessageId,
-      resolveChatGPTConversationId
+      resolveChatGPTConversationId,
+      isGenerationControlLabel
     });
     return;
   }
@@ -443,7 +450,8 @@
       assistantMessages: response.messages,
       readStrategy: response.strategy,
       messageCandidates: response.candidates,
-      continuationMarker: response.continuationMarker
+      continuationMarker: response.continuationMarker,
+      generationInProgress: generationInProgress()
     };
   }
 
@@ -496,14 +504,14 @@
   let stableSignature = "";
   let stableCount = 0;
   function generationInProgress() {
-    const controls = [...document.querySelectorAll("button")];
+    const controls = [...document.querySelectorAll("button, [role='button']")];
     return controls.some(button => {
       if (!visible(button)) return false;
       const label = [
         button.innerText, button.getAttribute("aria-label"),
         button.getAttribute("data-testid"), button.title
-      ].join(" ").toLowerCase();
-      return /stop generating|stop response|cancel response|\bstop\b|إيقاف التوليد/.test(label);
+      ].join(" ");
+      return isGenerationControlLabel(label);
     });
   }
   function queueAssistantSnapshot() {
