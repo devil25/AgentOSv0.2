@@ -187,7 +187,7 @@ def execute(action, args, emit=None):
             shell=False,
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
         )
-        output_queue = queue.Queue()
+        output_queue = queue.Queue(maxsize=64)
 
         def pump_output(stream_name, pipe):
             try:
@@ -209,22 +209,29 @@ def execute(action, args, emit=None):
         deadline = started_clock + timeout
         timed_out = False
 
+        def enforce_timeout():
+            nonlocal timed_out
+            if timed_out or process.poll() is not None or time.monotonic() < deadline:
+                return
+            timed_out = True
+            try:
+                process.terminate()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
         while active_streams:
-            wait_for = min(0.15, max(0.0, deadline - time.monotonic()))
+            # Check the deadline even while output is continuously arriving.
+            # A full bounded queue also applies back-pressure to fast processes.
+            enforce_timeout()
+            wait_for = 0.15 if timed_out else min(0.15, max(0.0, deadline - time.monotonic()))
             try:
                 stream_name, chunk = output_queue.get(timeout=wait_for)
             except queue.Empty:
-                if process.poll() is None and time.monotonic() >= deadline:
-                    timed_out = True
-                    try:
-                        process.terminate()
-                    except OSError:
-                        pass
-                    try:
-                        process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
                 continue
 
             if chunk is None:
