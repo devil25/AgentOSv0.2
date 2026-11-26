@@ -1,12 +1,53 @@
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch, Mock
+import subprocess
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentos.actions import execute, handle
+
+
+class FakePipe:
+    def __init__(self, chunks=(), unblock_event=None):
+        self.chunks = iter(chunks)
+        self.unblock_event = unblock_event
+
+    def readline(self):
+        try:
+            return next(self.chunks)
+        except StopIteration:
+            if self.unblock_event is not None:
+                self.unblock_event.wait(timeout=5)
+            return ""
+
+
+class FakeProcess:
+    def __init__(self, stdout=("ok\n",), stderr=(), returncode=0, blocking=False):
+        self._returncode = returncode
+        self._event = threading.Event()
+        event = self._event if blocking else None
+        self.stdout = FakePipe(stdout, event)
+        self.stderr = FakePipe(stderr, event)
+
+    def poll(self):
+        return self._returncode
+
+    def wait(self, timeout=None):
+        if self._returncode is None:
+            raise subprocess.TimeoutExpired("fake-process", timeout)
+        return self._returncode
+
+    def terminate(self):
+        self._returncode = -15
+        self._event.set()
+
+    def kill(self):
+        self._returncode = -9
+        self._event.set()
 
 
 class ActionTests(unittest.TestCase):
@@ -50,36 +91,35 @@ class ActionTests(unittest.TestCase):
                         {"path": "notes/summary.md", "content": "overwrite"},
                     )
 
-
     def test_terminal_execute_uses_workspace_as_working_directory(self):
-        completed = Mock(returncode=0, stdout="ok", stderr="")
+        process = FakeProcess(stdout=("ok\n",))
         with patch("agentos.paths.WORKSPACE", Path(tempfile.gettempdir())):
-            with patch("agentos.actions.subprocess.run", return_value=completed) as run:
+            with patch("agentos.actions.subprocess.Popen", return_value=process) as popen:
                 result = execute("terminal.execute", {"command": "echo ok"})
         self.assertTrue(result["ok"])
-        self.assertEqual(result["stdout"], "ok")
-        self.assertEqual(run.call_args.kwargs["cwd"], str(Path(tempfile.gettempdir()).resolve()))
-        self.assertFalse(run.call_args.kwargs["shell"])
+        self.assertEqual(result["stdout"], "ok\n")
+        self.assertEqual(popen.call_args.kwargs["cwd"], str(Path(tempfile.gettempdir()).resolve()))
+        self.assertFalse(popen.call_args.kwargs["shell"])
 
     def test_terminal_execute_allows_unrestricted_command_text(self):
-        completed = Mock(returncode=0, stdout="mocked", stderr="")
-        with patch("agentos.actions.subprocess.run", return_value=completed) as run:
+        process = FakeProcess(stdout=("mocked\n",))
+        with patch("agentos.actions.subprocess.Popen", return_value=process) as popen:
             result = execute("terminal.execute", {"command": "format C:"})
         self.assertTrue(result["ok"])
-        self.assertEqual(run.call_args.args[0][-1], "format C:")
+        self.assertEqual(popen.call_args.args[0][-1], "format C:")
 
     def test_terminal_execute_allows_external_working_directory(self):
         with tempfile.TemporaryDirectory() as workspace:
             with tempfile.TemporaryDirectory() as external:
-                completed = Mock(returncode=0, stdout="external", stderr="")
+                process = FakeProcess(stdout=("external\n",))
                 with patch("agentos.paths.WORKSPACE", Path(workspace)):
-                    with patch("agentos.actions.subprocess.run", return_value=completed) as run:
+                    with patch("agentos.actions.subprocess.Popen", return_value=process) as popen:
                         result = execute("terminal.execute", {
                             "command": "Get-Location",
                             "cwd": external
                         })
                 self.assertTrue(result["ok"])
-                self.assertEqual(run.call_args.kwargs["cwd"], str(Path(external).resolve()))
+                self.assertEqual(popen.call_args.kwargs["cwd"], str(Path(external).resolve()))
                 self.assertEqual(result["cwd"], str(Path(external).resolve()))
 
     def test_terminal_execute_rejects_nonexistent_working_directory(self):
@@ -89,24 +129,40 @@ class ActionTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "existing directory"):
                     execute("terminal.execute", {"command": "Get-Location", "cwd": missing})
 
+    def test_terminal_execute_streams_stdout_and_stderr_events(self):
+        process = FakeProcess(stdout=("first line\n",), stderr=("warning line\n",))
+        events = []
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {"command": "Write-Output test"}, emit=events.append)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["stdout"], "first line\n")
+        self.assertEqual(result["stderr"], "warning line\n")
+        self.assertEqual(events[0]["type"], "terminal.started")
+        self.assertIn("terminal.output", [event["type"] for event in events])
+        self.assertEqual(events[-1]["type"], "terminal.finished")
+        self.assertEqual(events[-1]["returncode"], 0)
+
     def test_terminal_execute_returns_partial_output_on_timeout(self):
-        timeout_error = __import__("subprocess").TimeoutExpired(
-            cmd=["powershell.exe"], timeout=2,
-            output=b"partial stdout", stderr=b"partial stderr"
+        process = FakeProcess(
+            stdout=("partial stdout\n",),
+            stderr=("partial stderr\n",),
+            returncode=None,
+            blocking=True,
         )
-        with patch("agentos.actions.subprocess.run", side_effect=timeout_error):
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
             result = execute("terminal.execute", {
                 "command": "Start-Sleep -Seconds 10",
-                "timeout_seconds": 2
+                "timeout_seconds": 1
             })
         self.assertFalse(result["ok"])
         self.assertTrue(result["timed_out"])
-        self.assertEqual(result["stdout"], "partial stdout")
-        self.assertEqual(result["stderr"], "partial stderr")
+        self.assertIsNone(result["returncode"])
+        self.assertEqual(result["stdout"], "partial stdout\n")
+        self.assertEqual(result["stderr"], "partial stderr\n")
 
     def test_terminal_execute_accepts_timeout_up_to_600_seconds(self):
-        completed = Mock(returncode=0, stdout="ok", stderr="")
-        with patch("agentos.actions.subprocess.run", return_value=completed):
+        process = FakeProcess(stdout=("ok\n",))
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
             result = execute("terminal.execute", {
                 "command": "Get-Date",
                 "timeout_seconds": 600
