@@ -1,6 +1,9 @@
 import re
 import os
 import subprocess
+import queue
+import threading
+import time
 from pathlib import Path
 from . import paths as agent_paths
 from .paths import safe_workspace_path, SKILLS
@@ -46,7 +49,7 @@ def _workspace_relative(path):
     # Resolve both sides to avoid Windows short-name/case differences.
     return path.resolve().relative_to(agent_paths.WORKSPACE.resolve()).as_posix()
 
-def execute(action, args):
+def execute(action, args, emit=None):
     if not isinstance(action, str) or action not in SUPPORTED_ACTIONS:
         raise ValueError("Unsupported action: " + str(action))
     if not isinstance(args, dict):
@@ -153,48 +156,121 @@ def execute(action, args):
         else:
             argv = ["/bin/bash", "-lc", command]
 
-        try:
-            completed = subprocess.run(
-                argv,
-                cwd=str(working_directory),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-                shell=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            def partial_text(value):
-                if value is None:
-                    return ""
-                if isinstance(value, bytes):
-                    return value.decode("utf-8", "replace")[-60000:]
-                return str(value)[-60000:]
+        started_at = time.time()
+        started_clock = time.monotonic()
 
-            return {
-                "ok": False,
-                "timed_out": True,
-                "returncode": None,
-                "timeout_seconds": timeout,
-                "cwd": str(working_directory),
-                "stdout": partial_text(exc.stdout),
-                "stderr": partial_text(exc.stderr),
-                "command": command,
-                "execution_scope": "current operating-system user permissions; no workspace sandbox",
-            }
+        def emit_event(event_type, **details):
+            if callable(emit):
+                try:
+                    emit({"type": event_type, **details})
+                except Exception:
+                    # A closed UI/native-messaging port must not break the command.
+                    pass
 
-        stdout = completed.stdout[-60000:]
-        stderr = completed.stderr[-60000:]
-        return {
-            "ok": completed.returncode == 0,
-            "returncode": completed.returncode,
+        emit_event(
+            "terminal.started",
+            command=command[:12000],
+            cwd=str(working_directory),
+            timeout_seconds=timeout,
+            started_at=started_at,
+        )
+
+        process = subprocess.Popen(
+            argv,
+            cwd=str(working_directory),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            shell=False,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+        output_queue = queue.Queue()
+
+        def pump_output(stream_name, pipe):
+            try:
+                for line in iter(pipe.readline, ""):
+                    if line:
+                        output_queue.put((stream_name, line))
+            finally:
+                output_queue.put((stream_name, None))
+
+        readers = [
+            threading.Thread(target=pump_output, args=("stdout", process.stdout), daemon=True),
+            threading.Thread(target=pump_output, args=("stderr", process.stderr), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
+
+        output = {"stdout": "", "stderr": ""}
+        active_streams = len(readers)
+        deadline = started_clock + timeout
+        timed_out = False
+
+        while active_streams:
+            wait_for = min(0.15, max(0.0, deadline - time.monotonic()))
+            try:
+                stream_name, chunk = output_queue.get(timeout=wait_for)
+            except queue.Empty:
+                if process.poll() is None and time.monotonic() >= deadline:
+                    timed_out = True
+                    try:
+                        process.terminate()
+                    except OSError:
+                        pass
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                continue
+
+            if chunk is None:
+                active_streams -= 1
+                continue
+
+            output[stream_name] = (output[stream_name] + chunk)[-60000:]
+            # Keep native messages small even when a process emits a huge line.
+            for offset in range(0, len(chunk), 4000):
+                emit_event(
+                    "terminal.output",
+                    stream=stream_name,
+                    text=chunk[offset:offset + 4000],
+                    at=time.time(),
+                )
+
+        for reader in readers:
+            reader.join(timeout=0.25)
+
+        if timed_out:
+            returncode = None
+        else:
+            returncode = process.wait()
+
+        elapsed_ms = int((time.monotonic() - started_clock) * 1000)
+        result = {
+            "ok": not timed_out and returncode == 0,
+            "timed_out": timed_out,
+            "returncode": returncode,
+            "timeout_seconds": timeout,
+            "elapsed_ms": elapsed_ms,
+            "started_at": started_at,
             "cwd": str(working_directory),
-            "stdout": stdout,
-            "stderr": stderr,
+            "stdout": output["stdout"],
+            "stderr": output["stderr"],
             "command": command,
             "execution_scope": "current operating-system user permissions; no workspace sandbox",
         }
+        emit_event(
+            "terminal.finished",
+            ok=result["ok"],
+            timed_out=timed_out,
+            returncode=returncode,
+            elapsed_ms=elapsed_ms,
+        )
+        return result
 
     if action == "workspace.create_file":
         p = safe_workspace_path(_required_text(args, "path", 1024))
