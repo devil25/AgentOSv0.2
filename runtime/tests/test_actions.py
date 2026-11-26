@@ -198,6 +198,17 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(result["stdout"], "partial stdout\n")
         self.assertEqual(result["stderr"], "partial stderr\n")
 
+    def test_terminal_timeout_still_applies_after_output_pipes_close(self):
+        process = FakeProcess(stdout=(), stderr=(), returncode=None)
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = execute("terminal.execute", {
+                "command": "close-output-then-keep-running",
+                "timeout_seconds": 1,
+            })
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["timed_out"])
+        self.assertIsNone(result["returncode"])
+
     def test_terminal_timeout_is_enforced_during_continuous_output(self):
         process = FakeProcess(stdout=(), stderr=(), returncode=None, blocking=True)
         process.stdout = ContinuousPipe(process._event)
