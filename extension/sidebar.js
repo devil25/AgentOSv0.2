@@ -318,6 +318,42 @@ async function decideAction(approved) {
     $("rejectActionBtn").disabled = false;
   }
 }
+async function permanentlyStopTask() {
+  if (!confirm("Permanently stop this task? It will not be resumed. A currently running action will finish safely, then the task will be marked cancelled.")) return;
+  $("permanentStopBtn").disabled = true;
+  try {
+    const result = await api.runtime.sendMessage({ type: "AGENTOS_TASK_PERMANENT_STOP" });
+    if (!result?.ok) throw new Error(result?.error || "Could not permanently stop the task.");
+    out(result.pending
+      ? "Stop requested. Waiting for the current operation to finish; no further agent step will run."
+      : "Task permanently stopped. You can now clear its history or change the workspace.");
+    renderTaskState(result.state || null);
+  } catch (error) {
+    out({ ok: false, error: String(error.message || error) });
+  } finally {
+    $("permanentStopBtn").disabled = false;
+    await loadTaskState();
+  }
+}
+async function clearTaskHistory() {
+  if (!confirm("Clear the current task's saved history and activity timeline? Other tasks and workspace files will not be deleted.")) return;
+  $("clearTaskHistoryBtn").disabled = true;
+  try {
+    const result = await api.runtime.sendMessage({ type: "AGENTOS_TASK_HISTORY_CLEAR" });
+    if (!result?.ok) throw new Error(result?.error || "Could not clear task history.");
+    terminalOutputBuffer = "";
+    lastRenderedResultKey = null;
+    $("terminalLiveOutput").textContent = "History cleared. Waiting for the next task.";
+    $("liveCommand").textContent = "No command running";
+    $("liveCommandMeta").textContent = "Commands and output will appear here as they run.";
+    renderTaskState(null);
+    out({ ok: true, message: "Current task history cleared. Workspace files were not changed." });
+  } catch (error) {
+    out({ ok: false, error: String(error.message || error) });
+  } finally {
+    $("clearTaskHistoryBtn").disabled = false;
+  }
+}
 async function capture() {
   const result = await api.runtime.sendMessage({ type: "AGENTOS_PAGE_INFO" });
   if (!result?.ok) { out(result); return; }
@@ -363,6 +399,8 @@ $("connectBtn").addEventListener("click", testRuntime);
 $("providerCheckBtn").addEventListener("click", providerCheck);
 $("sendTaskBtn").addEventListener("click", sendTask);
 $("resumeTaskBtn").addEventListener("click", resumeTask);
+$("permanentStopBtn").addEventListener("click", permanentlyStopTask);
+$("clearTaskHistoryBtn").addEventListener("click", clearTaskHistory);
 $("readResponseBtn").addEventListener("click", async () => {
   const result = await api.runtime.sendMessage({ type: "AGENTOS_PROVIDER_READ" });
   out(result);
@@ -390,7 +428,10 @@ document.querySelectorAll(".tab").forEach(button => button.addEventListener("cli
   $("panel-" + button.dataset.tab).classList.add("active");
 }));
 api.runtime.onMessage.addListener(message => {
-  if (message?.type === "AGENTOS_TASK_STATE_UPDATED") renderTaskState(message.state);
+  if (message?.type === "AGENTOS_TASK_STATE_UPDATED") {
+    if (message.state) renderTaskState(message.state);
+    else { activeTaskId = null; renderTaskState(null); }
+  }
   if (message?.type === "AGENTOS_TERMINAL_EVENT" && (!message.taskId || message.taskId === activeTaskId)) {
     const event = message.event || {};
     if (event.type === "terminal.started") {
