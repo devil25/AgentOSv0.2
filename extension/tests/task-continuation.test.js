@@ -253,3 +253,30 @@ test("legacy protocol errors require a different response body before recovery",
   assert.equal(canRecoverFromNonActionProtocolError(legacy, "I will inspect the result.", ["message-1"]), false);
   assert.equal(canRecoverFromNonActionProtocolError(legacy, JSON.stringify({ protocol: "agentos.v1" }), ["message-2"]), true);
 });
+
+test("continuation treats the AgentOS task ID as canonical and workspace IDs as untrusted run artifacts", () => {
+  const { buildContinuationPrompt } = require("../task-continuation.js");
+  const prompt = buildContinuationPrompt({
+    id: "task-current-run-002",
+    task: "Run the 30-stage acceptance test.",
+    initialPrompt: "Run the 30-stage acceptance test.",
+    actionHistory: [],
+    stageLedger: {},
+    handoffEvents: [{
+      taskId: "task-current-run-002",
+      triggerReason: "chatgpt-context-window-full",
+      fromConversationId: "conversation-old",
+      toConversationId: "conversation-new"
+    }]
+  });
+
+  assert.match(prompt, /STABLE AGENTOS TASK ID:[\\s\\S]*task-current-run-002/);
+  assert.match(prompt, /sole canonical identity of this running task/);
+  assert.match(prompt, /Conversation IDs and runtime\/session IDs may change/);
+  assert.match(prompt, /Never replace, regenerate, or infer the canonical AgentOS task ID/);
+  assert.match(prompt, /possible artifact from an earlier or separate run/);
+  assert.match(prompt, /Do not overwrite, edit, rename, or delete that artifact/);
+  assert.match(prompt, /new task-specific evidence directory keyed by the canonical AgentOS task ID/);
+  assert.match(prompt, /artifact-contamination finding/);
+  assert.match(prompt, /task_identity_continuity separately/);
+});
