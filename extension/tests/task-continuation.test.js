@@ -1,0 +1,56 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { buildContinuationPrompt } = require("../task-continuation.js");
+
+test("continuation in a new conversation repeats the complete original AgentOS prompt", () => {
+  const first = {
+    action: "terminal.execute",
+    arguments: { command: "Write-Output STAGE_01_PASS", cwd: "D:\\workspace" },
+    result: { ok: true, returncode: 0, stdout: "STAGE_01_PASS" }
+  };
+  const latest = {
+    action: "terminal.execute",
+    arguments: { command: "Write-Output STAGE_02_PASS" },
+    result: { ok: true, returncode: 0, stdout: "STAGE_02_PASS" }
+  };
+  const state = {
+    task: "Run all 25 stages.",
+    initialPrompt: "AGENTOS_SYSTEM_RULES_UNIQUE\nUSER TASK: run all 25 stages.",
+    steps: 2,
+    actionHistory: [first, latest]
+  };
+
+  const prompt = buildContinuationPrompt(state, latest);
+  assert.match(prompt, /AGENTOS_SYSTEM_RULES_UNIQUE/);
+  assert.match(prompt, /exact envelope/);
+  assert.match(prompt, /terminal\\.execute/);
+  assert.match(prompt, /STAGE_01_PASS/);
+  assert.match(prompt, /STAGE_02_PASS/);
+  assert.match(prompt, /first stage that has not succeeded/);
+});
+
+test("legacy saved tasks still receive an explicit AgentOS action protocol", () => {
+  const prompt = buildContinuationPrompt({ task: "Inspect a project." }, {
+    action: "workspace.list",
+    arguments: { path: "." },
+    result: { ok: true, stdout: "project.godot" }
+  });
+  assert.match(prompt, /Inspect a project/);
+  assert.match(prompt, /agentos\\.v1/);
+  assert.match(prompt, /Supported actions/);
+});
+
+test("action history is bounded to the latest 40 records", () => {
+  const history = Array.from({ length: 45 }, (_, i) => ({
+    action: "terminal.execute",
+    arguments: { command: "Write-Output STEP_" + (i + 1) },
+    result: { ok: true, stdout: "STEP_" + (i + 1) + "_PASS" }
+  }));
+  const prompt = buildContinuationPrompt({
+    initialPrompt: "Run the steps.",
+    actionHistory: history
+  });
+  assert.doesNotMatch(prompt, /STEP_1_PASS/);
+  assert.match(prompt, /STEP_6_PASS/);
+  assert.match(prompt, /STEP_45_PASS/);
+});
