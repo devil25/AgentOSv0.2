@@ -82,7 +82,7 @@
     if (currentId && targetId && currentId !== targetId) return false;
     if (currentUrl && currentUrl === event.toUrl) return true;
     if (currentId && targetId && currentId === targetId) return true;
-    return continuationMarker === true;
+    return continuationMarker === true && isChatGPTContinuationUrl("chatgpt", currentUrl);
   }
 
   function applyChatGPTHandoff(state, handoff, at = new Date().toISOString()) {
