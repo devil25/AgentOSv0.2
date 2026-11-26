@@ -205,3 +205,51 @@ test("bounds non-action recovery attempts", () => {
   assert.equal(nextNonActionRetryCount({ nonActionRetries: 1 }), 2);
   assert.equal(nextNonActionRetryCount({ nonActionRetries: 2 }), null);
 });
+
+test("recovers only an exhausted AgentOS non-action protocol error", () => {
+  const {
+    isRecoverableNonActionProtocolError,
+    canRecoverFromNonActionProtocolError,
+    recoverNonActionProtocolState
+  } = require("../task-continuation.js");
+  const state = {
+    id: "task-stable-30",
+    phase: "error",
+    nonActionRetries: 2,
+    error: "The AI website returned ordinary text instead of the next required AgentOS action. The staged task is still incomplete; no completion was recorded. Resume after inspecting the conversation.",
+    response: "I will continue with the next step.",
+    protocolRecovery: {
+      response: "I will continue with the next step.",
+      messageIds: ["assistant-old"]
+    },
+    actionHistory: [{ action: "terminal.execute", result: { ok: true } }],
+    stageLedger: { "21": { number: 21, total: 30, status: "passed" } },
+    handoffEvents: [{ taskId: "task-stable-30", triggerReason: "chatgpt-context-window-full" }]
+  };
+  assert.equal(isRecoverableNonActionProtocolError(state), true);
+  assert.equal(canRecoverFromNonActionProtocolError(state, "I will continue with the next step.", ["assistant-old"]), false);
+  const actionText = JSON.stringify({ protocol: "agentos.v1", type: "action", action: "terminal.execute", arguments: { command: "Write-Output PASS" } });
+  assert.equal(canRecoverFromNonActionProtocolError(state, actionText, ["assistant-new"]), true);
+  const recovered = recoverNonActionProtocolState(state, actionText, ["assistant-new"]);
+  assert.equal(recovered.phase, "awaiting_model");
+  assert.equal(recovered.error, null);
+  assert.equal(recovered.id, state.id);
+  assert.deepEqual(recovered.actionHistory, state.actionHistory);
+  assert.deepEqual(recovered.stageLedger, state.stageLedger);
+  assert.deepEqual(recovered.handoffEvents, state.handoffEvents);
+  assert.equal(recovered.nonActionRetries, 2);
+  assert.equal(isRecoverableNonActionProtocolError({ ...state, error: "Native host disconnected" }), false);
+  assert.equal(isRecoverableNonActionProtocolError({ ...state, nonActionRetries: 1 }), false);
+});
+
+test("legacy protocol errors require a different response body before recovery", () => {
+  const { canRecoverFromNonActionProtocolError } = require("../task-continuation.js");
+  const legacy = {
+    phase: "error",
+    nonActionRetries: 2,
+    error: "The AI website returned ordinary text instead of a valid AgentOS action after the bounded protocol-recovery attempts. No action was executed. Inspect the AI response before retrying.",
+    response: "I will inspect the result."
+  };
+  assert.equal(canRecoverFromNonActionProtocolError(legacy, "I will inspect the result.", ["message-1"]), false);
+  assert.equal(canRecoverFromNonActionProtocolError(legacy, JSON.stringify({ protocol: "agentos.v1" }), ["message-2"]), true);
+});
