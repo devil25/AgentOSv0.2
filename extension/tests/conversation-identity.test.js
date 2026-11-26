@@ -206,3 +206,102 @@ test("preserves one canonical AgentOS task ID across multiple verified context h
   assert.deepEqual(third.stageLedger, original.stageLedger);
   assert.deepEqual(third.actionHistory, original.actionHistory);
 });
+
+test("does not adopt an arbitrary local-chatgpt URL without a task-bound handoff event", () => {
+  const { isVerifiedChatGPTContinuation } = require("../conversation-identity.js");
+  const state = {
+    id: "task-safe-1", provider: "chatgpt", phase: "awaiting_model",
+    providerUrl: "https://chatgpt.com/c/old",
+    conversationTransfer: { to: "https://chatgpt.com/c/new" }
+  };
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/local-chatgpt:unrelated", null, false
+  ), false);
+});
+
+test("accepts only a continuation bound to the same task and its verified handoff target", () => {
+  const { isVerifiedChatGPTContinuation } = require("../conversation-identity.js");
+  const state = {
+    id: "task-safe-2", provider: "chatgpt", phase: "awaiting_model",
+    providerUrl: "https://chatgpt.com/c/new",
+    handoffEvents: [{
+      provider: "chatgpt", taskId: "task-safe-2",
+      triggerReason: "chatgpt-context-window-full",
+      toUrl: "https://chatgpt.com/c/new",
+      toConversationId: "conversation-new"
+    }],
+    conversationTransfer: {
+      method: "chatgpt-context-window-new-chat",
+      triggerReason: "chatgpt-context-window-full",
+      to: "https://chatgpt.com/c/new",
+      toConversationId: "conversation-new"
+    }
+  };
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/new", null, false
+  ), true);
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/local-chatgpt:migrated", "conversation-new", false
+  ), true);
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/local-chatgpt:migrated", null, true
+  ), true);
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/unrelated-standard-route", null, true
+  ), false);
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/local-chatgpt:other", "conversation-other", false
+  ), false);
+  assert.equal(isVerifiedChatGPTContinuation(
+    { ...state, id: "different-task" },
+    "https://chatgpt.com/c/local-chatgpt:migrated", "conversation-new", false
+  ), false);
+});
+
+test("requires the handoff ledger and transfer metadata to agree", () => {
+  const { isVerifiedChatGPTContinuation } = require("../conversation-identity.js");
+  const state = {
+    id: "task-safe-3", provider: "chatgpt", phase: "awaiting_model",
+    handoffEvents: [{
+      provider: "chatgpt", taskId: "task-safe-3",
+      triggerReason: "chatgpt-context-window-full",
+      toUrl: "https://chatgpt.com/c/new",
+      toConversationId: "conversation-new"
+    }],
+    conversationTransfer: {
+      method: "chatgpt-context-window-new-chat",
+      triggerReason: "chatgpt-context-window-full",
+      to: "https://chatgpt.com/c/new",
+      toConversationId: "different-conversation"
+    }
+  };
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/new", null, false
+  ), false);
+  assert.equal(isVerifiedChatGPTContinuation(
+    { ...state, phase: "completed" },
+    "https://chatgpt.com/c/new", null, false
+  ), false);
+});
+
+test("rejects a conflicting DOM identity even when a continuation marker is present", () => {
+  const { isVerifiedChatGPTContinuation } = require("../conversation-identity.js");
+  const state = {
+    id: "task-safe-4", provider: "chatgpt", phase: "awaiting_model",
+    handoffEvents: [{
+      provider: "chatgpt", taskId: "task-safe-4",
+      triggerReason: "chatgpt-context-window-full",
+      toUrl: "https://chatgpt.com/c/new",
+      toConversationId: "conversation-new"
+    }],
+    conversationTransfer: {
+      method: "chatgpt-context-window-new-chat",
+      triggerReason: "chatgpt-context-window-full",
+      to: "https://chatgpt.com/c/new",
+      toConversationId: "conversation-new"
+    }
+  };
+  assert.equal(isVerifiedChatGPTContinuation(
+    state, "https://chatgpt.com/c/local-chatgpt:other", "conversation-other", true
+  ), false);
+});

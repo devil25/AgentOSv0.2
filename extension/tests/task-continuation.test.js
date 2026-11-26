@@ -270,7 +270,7 @@ test("continuation treats the AgentOS task ID as canonical and workspace IDs as 
     }]
   });
 
-  assert.match(prompt, /STABLE AGENTOS TASK ID:[\\s\\S]*task-current-run-002/);
+  assert.match(prompt, /STABLE AGENTOS TASK ID:[\s\S]*task-current-run-002/);
   assert.match(prompt, /sole canonical identity of this running task/);
   assert.match(prompt, /Conversation IDs and runtime\/session IDs may change/);
   assert.match(prompt, /Never replace, regenerate, or infer the canonical AgentOS task ID/);
@@ -279,4 +279,58 @@ test("continuation treats the AgentOS task ID as canonical and workspace IDs as 
   assert.match(prompt, /new task-specific evidence directory keyed by the canonical AgentOS task ID/);
   assert.match(prompt, /artifact-contamination finding/);
   assert.match(prompt, /task_identity_continuity separately/);
+});
+
+
+
+test("isolates each staged acceptance-test run under its canonical task ID", () => {
+  const { buildTaskRunContext, buildInitialTaskPrompt } = require("../task-continuation.js");
+  const initial = [
+    "Test ID: AGENTOS-FINAL-2026-30",
+    "Run 30 stages.",
+    "أنشئ مجلداً مستقلاً:",
+    "",
+    "AgentOS_Final_Acceptance_2026"
+  ].join("\n");
+  const context = buildTaskRunContext(initial, "task-run-123-abc");
+  assert.deepEqual(context, {
+    testId: "AGENTOS-FINAL-2026-30",
+    stageCount: 30,
+    runEvidenceDirectory: "AgentOS_Final_Acceptance_2026/runs/task-run-123-abc"
+  });
+
+  const state = { id: "task-run-123-abc", ...context };
+  const prompt = buildInitialTaskPrompt(state, initial);
+  assert.match(prompt, /AGENTOS RUN-SCOPED ARTIFACT ISOLATION/);
+  assert.match(prompt, /AgentOS_Final_Acceptance_2026\/runs\/task-run-123-abc/);
+  assert.match(prompt, /pre-existing test-root files.*read-only/i);
+  assert.match(prompt, /Never derive or change it from a conversation ID/);
+});
+
+test("carries the exact run evidence directory through automatic context continuation", () => {
+  const state = {
+    id: "task-run-123-abc",
+    task: "Run 30 stages.",
+    initialPrompt: "Test ID: AGENTOS-FINAL-2026-30",
+    testId: "AGENTOS-FINAL-2026-30",
+    stageCount: 30,
+    runEvidenceDirectory: "AgentOS_Final_Acceptance_2026/runs/task-run-123-abc",
+    actionHistory: [],
+    stageLedger: {},
+    handoffEvents: []
+  };
+  const prompt = buildContinuationPrompt(state);
+  assert.match(prompt, /RUN-SCOPED ARTIFACT ISOLATION/);
+  assert.match(prompt, /AgentOS_Final_Acceptance_2026\/runs\/task-run-123-abc/);
+  assert.match(prompt, /Preserve this exact directory across all conversation handoffs/);
+});
+
+test("does not alter ordinary prompts or accept unsafe run directory paths", () => {
+  const { buildTaskRunContext, buildInitialTaskPrompt } = require("../task-continuation.js");
+  assert.equal(buildTaskRunContext("Explain a programming concept.", "task-safe-1"), null);
+  assert.equal(buildTaskRunContext(
+    "Test ID: TEST-1\nRun 5 stages.\nCreate an isolated folder: ..\\outside",
+    "task-safe-2"
+  ), null);
+  assert.equal(buildInitialTaskPrompt({ id: "task-safe-1" }, "ordinary prompt"), "ordinary prompt");
 });

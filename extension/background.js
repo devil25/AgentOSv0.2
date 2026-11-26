@@ -6,7 +6,7 @@ if (!conversationIdentity) {
 const {
   chatGPTConversationIdentityMatches,
   sameConversation,
-  isChatGPTContinuationUrl,
+  isVerifiedChatGPTContinuation,
   applyChatGPTHandoff
 } = conversationIdentity;
 const taskContinuation = globalThis.AgentOSTaskContinuation;
@@ -14,6 +14,8 @@ if (!taskContinuation) {
   throw new Error("AgentOS task continuation helpers were not loaded.");
 }
 const {
+  buildTaskRunContext,
+  buildInitialTaskPrompt,
   buildContinuationPrompt,
   requiresAgentAction,
   requiresUnfinishedStagedTask,
@@ -162,17 +164,19 @@ async function taskStateForActiveTab() {
     // Adopt that URL only for the same tab/provider while awaiting the model.
     const active = await readTaskState();
     if (active && active.tabId === tab.id && active.provider === info.provider &&
-        active.phase === "awaiting_model" &&
-        (isChatGPTContinuationUrl(info.provider, info.url) ||
-          (info.provider === "chatgpt" && info.continuationMarker === true &&
-            active.conversationTransfer?.to === active.providerUrl))) {
+        isVerifiedChatGPTContinuation(active, info.url, info.conversationId, info.continuationMarker === true)) {
       const migrated = await writeTaskState({
         ...active,
         providerUrl: info.url,
         conversationTransfer: {
-          from: active.providerUrl,
-          to: info.url,
-          at: new Date().toISOString()
+          ...(active.conversationTransfer || {}),
+          observedUrl: info.url,
+          observedAt: new Date().toISOString(),
+          verifiedBy: info.continuationMarker === true
+            ? "chatgpt-continued-from-marker"
+            : active.conversationTransfer?.toConversationId
+              ? "chatgpt-handoff-conversation-id"
+              : "chatgpt-handoff-target-url"
         }
       });
       return migrated;
@@ -745,23 +749,22 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
     state = await writeTaskState({ ...state, providerUrl: rawUrl, conversationTransfer: { ...(state.conversationTransfer || {}), from: state.providerUrl, to: rawUrl, observedUrl: rawUrl, verifiedBy: "chatgpt-dom-conversation-id", verifiedAt: new Date().toISOString() } });
   }
   if (rawUrl && !sameConversation(state, state.provider, rawUrl, conversationId)) {
-    const verifiedChatGPTContinuation =
-      state.phase === "awaiting_model" &&
-      state.provider === "chatgpt" &&
-      continuationMarker === true &&
-      state.conversationTransfer?.to === state.providerUrl;
-    if (state.phase === "awaiting_model" &&
-        (isChatGPTContinuationUrl(state.provider, rawUrl) || verifiedChatGPTContinuation)) {
+    const verifiedChatGPTContinuation = isVerifiedChatGPTContinuation(
+      state, rawUrl, conversationId, continuationMarker === true
+    );
+    if (verifiedChatGPTContinuation) {
       state = await writeTaskState({
         ...state,
         providerUrl: rawUrl,
         conversationTransfer: {
           ...(state.conversationTransfer || {}),
-          from: state.conversationTransfer?.from || state.providerUrl,
-          to: state.conversationTransfer?.to || rawUrl,
           observedUrl: rawUrl,
-          verifiedBy: verifiedChatGPTContinuation ? "chatgpt-continued-from-marker" : "local-chatgpt-url",
-          verifiedAt: new Date().toISOString()
+          observedAt: new Date().toISOString(),
+          verifiedBy: continuationMarker === true
+            ? "chatgpt-continued-from-marker"
+            : state.conversationTransfer?.toConversationId
+              ? "chatgpt-handoff-conversation-id"
+              : "chatgpt-handoff-target-url"
         }
       });
     } else {
@@ -927,19 +930,22 @@ async function startTask(message) {
       await writeTaskState({ ...existing, phase: "paused", resumePhase: existing.phase, error: "Paused automatically because you switched to another AI conversation. Return to the original conversation and resume this task." });
     }
   }
-  const prompt = message.prompt;
-  if (typeof prompt !== "string" || !prompt.trim()) {
+  const initialPrompt = message.prompt;
+  if (typeof initialPrompt !== "string" || !initialPrompt.trim()) {
     throw new Error("The initial AgentOS prompt is missing or empty.");
   }
   await setStopped(false);
   const id = "task-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  const runContext = buildTaskRunContext(initialPrompt, id);
   const state = {
-    id, task: message.task, initialPrompt: prompt, actionHistory: [],
+    id, task: message.task, initialPrompt, actionHistory: [],
+    ...(runContext || {}),
     autonomy: message.autonomy === "autonomous" ? "autonomous" : "supervised",
     tabId: tab.id, provider: info.provider, providerUrl: info.url,
     providerConversationId: info.conversationId || null,
     steps: 0, phase: "starting", startedAt: new Date().toISOString()
   };
+  const prompt = buildInitialTaskPrompt(state, initialPrompt);
   await setActiveTask(id);
   await writeTaskState(state);
   await sendPrompt(state, prompt);
