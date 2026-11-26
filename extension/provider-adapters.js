@@ -399,6 +399,7 @@
     if (provider?.id !== "chatgpt") return { ok: true, handedOff: false, url: location.href };
 
     const beforeUrl = location.href;
+    const beforeConversationId = getChatGPTConversationId();
     const buttons = [...document.querySelectorAll("button")].filter(visible);
     let target = null;
     for (const button of buttons) {
@@ -429,11 +430,27 @@
           return Boolean(node && (node.innerText || "").toLowerCase().includes("context window full"));
         })
       );
-      if (location.href !== beforeUrl && composer && !modalStillOpen) {
-        return { ok: true, handedOff: true, url: location.href };
+      const currentConversationId = getChatGPTConversationId();
+      const identityReady = beforeConversationId
+        ? Boolean(currentConversationId && currentConversationId !== beforeConversationId)
+        : Boolean(currentConversationId || hasChatGPTContinuationMarker());
+      if (location.href !== beforeUrl && composer && !modalStillOpen && identityReady) {
+        return {
+          ok: true,
+          handedOff: true,
+          url: location.href,
+          conversationId: currentConversationId,
+          continuationMarker: hasChatGPTContinuationMarker()
+        };
       }
     }
-    return { ok: false, handedOff: true, error: "ChatGPT's New chat button was clicked, but the new conversation did not become ready within 30 seconds.", url: location.href };
+    return {
+      ok: false,
+      handedOff: true,
+      error: "ChatGPT's New chat button was clicked, but the new conversation identity did not become ready within 30 seconds.",
+      url: location.href,
+      conversationId: getChatGPTConversationId()
+    };
   }
 
   async function inspect() {
