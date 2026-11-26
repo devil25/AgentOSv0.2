@@ -18,7 +18,7 @@
 
   <nav class="tabs" aria-label="AgentOS sections">
     <button class="tab active" data-tab="agent" aria-selected="true">Agent</button>
-    <button class="tab" data-tab="activity" aria-selected="false">Activity <span class="tab-live-dot"></span></button>
+    <button class="tab" data-tab="activity" aria-selected="false">Terminal <span class="tab-live-dot"></span></button>
     <button class="tab" data-tab="skills" aria-selected="false">Skills</button>
     <button class="tab" data-tab="plugins" aria-selected="false">Plugins</button>
     <button class="tab" data-tab="mcp" aria-selected="false">MCP</button>
@@ -86,31 +86,44 @@
     </section>
 
     <section id="panel-activity" class="panel">
-      <div class="activity-hero">
-        <div class="activity-hero-top"><div><div class="eyebrow">EXECUTION MONITOR</div><h2>Live activity</h2></div><span id="activityBadge" class="badge neutral">IDLE</span></div>
-        <div id="activityTask" class="activity-task">No active task</div>
-        <div class="progress-track"><span id="activityProgress"></span></div>
-        <div class="activity-stats"><span id="activityStepCount">0 actions</span><span id="activityPhase">Waiting for a task</span></div>
+      <div class="activity-hero terminal-screen-header">
+        <div class="activity-hero-top">
+          <div>
+            <div class="eyebrow">LIVE EXECUTION CONSOLE</div>
+            <h2>Terminal</h2>
+            <div id="activityTask" class="activity-task">No active task</div>
+          </div>
+          <span id="activityBadge" class="badge neutral">IDLE</span>
+        </div>
       </div>
 
-      <div class="card terminal-card">
-        <div class="terminal-heading"><div><span class="terminal-indicator"></span><div><div class="eyebrow">LIVE TERMINAL</div><div id="terminalStatus" class="terminal-status">Waiting for command execution</div></div></div><span id="terminalStreamState" class="stream-state">● STANDBY</span></div>
-        <div id="liveCommand" class="live-command">No command running</div>
-        <div id="liveCommandMeta" class="terminal-meta">Commands and output will appear here as they run.</div>
-        <pre id="terminalLiveOutput" class="terminal-output" aria-live="polite">Live stdout / stderr stream
-────────────────────────────
-Waiting for terminal.execute…</pre>
+      <div class="card terminal-card terminal-workspace">
+        <div id="terminalTabs" class="terminal-tabs" role="tablist" aria-label="Terminal sessions">
+          <div class="terminal-tabs-empty">Terminal sessions will appear here.</div>
+        </div>
+        <div class="terminal-heading">
+          <div>
+            <span class="terminal-indicator"></span>
+            <div>
+              <div class="eyebrow">POWERSHELL SESSION</div>
+              <div id="terminalStatus" class="terminal-status">Waiting for command execution</div>
+            </div>
+          </div>
+          <span id="terminalStreamState" class="stream-state">● STANDBY</span>
+        </div>
+        <pre id="liveCommand" class="live-command">No command running</pre>
+        <div id="liveCommandMeta" class="terminal-meta">The command and its output will appear here in real time.</div>
+        <pre id="terminalLiveOutput" class="terminal-output" aria-live="polite">Waiting for the first terminal command…</pre>
       </div>
 
-      <div class="card timeline-card">
-        <div class="timeline-heading"><div><div class="eyebrow">TASK TIMELINE</div><div class="card-title">Execution history</div></div><span class="timeline-count" id="activityCount">0 events</span></div>
-        <div id="activityTimeline" class="timeline"><div class="timeline-empty">Activity will appear here when a task starts.</div></div>
-        <div class="row task-maintenance-actions"><button id="checkAIResponseBtn" class="btn primary">Check AI response now</button></div>
-        <div class="row task-maintenance-actions"><button id="permanentStopBtn" class="btn danger">Stop task permanently</button><button id="clearTaskHistoryBtn" class="btn secondary">Clear stuck task history</button></div>
-        <p class="muted hint">Permanent stop cancels the task after any in-flight action finishes. Clear history removes only the selected task record; it never deletes project files.</p>
+      <div class="row task-maintenance-actions">
+        <button id="checkAIResponseBtn" class="btn primary">Check AI response now</button>
       </div>
-
-      <p class="activity-note">Live output is streamed from the local Windows runtime. Stop takes effect after the current action finishes; it does not forcibly terminate an in-flight command. The agent continues working if this sidebar is closed.</p>
+      <div class="row task-maintenance-actions">
+        <button id="permanentStopBtn" class="btn danger">Stop task permanently</button>
+        <button id="clearTaskHistoryBtn" class="btn secondary">Clear task history</button>
+      </div>
+      <p class="muted hint">Each terminal tab keeps the command and output from one terminal execution. Closing this sidebar does not stop the agent.</p>
     </section>
 
     <section id="panel-skills" class="panel">
