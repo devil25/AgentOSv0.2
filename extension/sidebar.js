@@ -133,11 +133,11 @@ function restoreTerminalTabs(state) {
     entry.action === "terminal.execute" && entry.phase === "action_completed"
   );
   const latestHistoryEntry = terminalHistory[terminalHistory.length - 1] || null;
-  const liveLatestExists = Boolean(latestTerminalId && terminals.has(latestTerminalId));
+  const liveLatestId = latestTerminalId && terminals.has(latestTerminalId) ? latestTerminalId : null;
   for (const entry of terminalHistory) {
     // The most recent result is already represented by the live terminal tab
     // when this sidebar was open during execution. Avoid creating a duplicate.
-    if (entry === latestHistoryEntry && liveLatestExists) continue;
+    if (entry === latestHistoryEntry && liveLatestId) continue;
     const id = entry.id || (state.id + ":history:" + terminalCounter);
     const record = ensureTerminal(id, {
       command: entry.command || "Terminal command",
@@ -148,6 +148,7 @@ function restoreTerminalTabs(state) {
     }, false);
     latestTerminalId = record.id;
   }
+  if (liveLatestId) latestTerminalId = liveLatestId;
 
   const action = state.action;
   if (action?.action === "terminal.execute" && ["executing", "awaiting_approval"].includes(state.phase)) {
