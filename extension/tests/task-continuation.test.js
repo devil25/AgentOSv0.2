@@ -73,7 +73,7 @@ test("builds one bounded action-protocol recovery prompt without claiming execut
   };
   const prompt = buildNonActionRetryPrompt(state, "I will start by checking the project.");
   assert.match(prompt, /FULL_AGENTOS_INSTRUCTIONS_AND_TASK/);
-  assert.match(prompt, /has not executed any action/);
+  assert.match(prompt, /That response executed no action/);
   assert.match(prompt, /exactly ONE valid fenced JSON action envelope/);
   assert.match(prompt, /I will start by checking the project/);
 });
