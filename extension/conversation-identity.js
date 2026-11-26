@@ -77,9 +77,10 @@
         (transfer.toConversationId || null) !== (event.toConversationId || null)) return false;
 
     const currentUrl = typeof url === "string" ? url : "";
-    if (currentUrl && currentUrl === event.toUrl) return true;
     const currentId = normalizeIdentity(conversationId);
     const targetId = normalizeIdentity(event.toConversationId);
+    if (currentId && targetId && currentId !== targetId) return false;
+    if (currentUrl && currentUrl === event.toUrl) return true;
     if (currentId && targetId && currentId === targetId) return true;
     return continuationMarker === true;
   }
