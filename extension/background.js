@@ -583,6 +583,55 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
     if (responseProcessingTaskId === state.id) responseProcessingTaskId = null;
   }
 }
+let responseReconcileInFlight = false;
+async function checkAwaitingModelResponse() {
+  if (responseReconcileInFlight) return { ok: true, checked: false, reason: "response-check-already-running" };
+  responseReconcileInFlight = true;
+  try {
+    const state = await readTaskState();
+    if (!state || state.phase !== "awaiting_model") {
+      return { ok: true, checked: false, reason: "task-not-awaiting-model", state: state || null };
+    }
+    if (await isStopped()) {
+      return { ok: true, checked: false, reason: "agent-stopped", state };
+    }
+    if (responseProcessingTaskId === state.id) {
+      return { ok: true, checked: false, reason: "response-already-processing", state };
+    }
+
+    // Poll the provider directly as a fallback to the page MutationObserver.
+    // This also gives the user a manual "check now" recovery path.
+    const info = await tabRequest(state.tabId, "AGENTOS_PROVIDER_INSPECT");
+    if (!info?.ok) {
+      return { ok: false, checked: true, error: info?.error || "Could not inspect the original AI tab.", state };
+    }
+    if (info.provider !== state.provider) {
+      return { ok: true, checked: true, reason: "provider-mismatch", state };
+    }
+    if (info.generationInProgress === true) {
+      return { ok: true, checked: true, reason: "generation-in-progress", state };
+    }
+    const snapshot = await readProviderMessages(state.tabId);
+    const result = await handleAssistantSnapshot(
+      state.tabId, snapshot.messages, snapshot.url, snapshot.strategy,
+      snapshot.continuationMarker, snapshot.messageIds, snapshot.conversationId
+    );
+    return { ...result, checked: true, state: await readTaskState() };
+  } catch (error) {
+    return { ok: false, checked: true, error: String(error.message || error) };
+  } finally {
+    responseReconcileInFlight = false;
+  }
+}
+
+// Poll while a task waits for the model. The content-script observer remains the
+// fast path; this catches missed DOM notifications and late content-script delivery.
+setInterval(() => {
+  checkAwaitingModelResponse().catch(error => {
+    console.warn("[AgentOS] Background response reconciliation failed.", error);
+  });
+}, 2500);
+
 async function startTask(message) {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("Open a supported AI website tab first.");
@@ -741,6 +790,7 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "AGENTOS_NATIVE_REQUEST") return nativeRequest(message.payload);
   if (message?.type === "AGENTOS_TASK_STATE_GET") return taskStateForActiveTab().then(state => ({ ok: true, state }));
   if (message?.type === "AGENTOS_TASK_STATE_SET") return writeTaskState(message.state).then(state => ({ ok: true, state }));
+  if (message?.type === "AGENTOS_TASK_CHECK_RESPONSE") return checkAwaitingModelResponse();
   if (message?.type === "AGENTOS_TASK_START") return startTask(message);
   if (message?.type === "AGENTOS_TASK_RESUME") return resumeTask(message.taskId);
   if (message?.type === "AGENTOS_TASK_APPROVAL") return readTaskState().then(async state => {
