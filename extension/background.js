@@ -13,7 +13,11 @@ const taskContinuation = globalThis.AgentOSTaskContinuation;
 if (!taskContinuation) {
   throw new Error("AgentOS task continuation helpers were not loaded.");
 }
-const { buildContinuationPrompt } = taskContinuation;
+const {
+  buildContinuationPrompt,
+  requiresAgentAction,
+  buildNonActionRetryPrompt
+} = taskContinuation;
 
 const TASK_STATE_KEY = "agentos.taskState";
 const TASKS_KEY = "agentos.tasks";
@@ -577,6 +581,34 @@ async function processModelResponse(state, response) {
   const ready = await writeTaskState({ ...state, phase: "response_ready", response });
   const action = globalThis.AgentOSActionParser?.extractAction(response) || null;
   if (!action) {
+    // A tool-required task must not be marked complete merely because the
+    // model answered in prose before executing its first action. Give it one
+    // bounded protocol-recovery attempt; no action has run, so this is safe.
+    if (requiresAgentAction(ready) && Number(ready.steps || 0) === 0) {
+      const retries = Number(ready.nonActionRetries || 0);
+      if (retries < 1) {
+        const retryPrompt = buildNonActionRetryPrompt(ready, response);
+        const retryState = await writeTaskState({
+          ...ready,
+          phase: "action_completed",
+          response: null,
+          finalResponse: null,
+          action: null,
+          error: null,
+          nonActionRetries: retries + 1,
+          prompt: retryPrompt
+        });
+        await sendPrompt(retryState, retryPrompt);
+        return;
+      }
+      await writeTaskState({
+        ...ready,
+        phase: "error",
+        finalResponse: null,
+        error: "The AI website returned ordinary text instead of a valid AgentOS action, even after one protocol-recovery attempt. No terminal command was executed. Inspect the AI response before retrying."
+      });
+      return;
+    }
     await writeTaskState({ ...ready, phase: "completed", finalResponse: response, response });
     return;
   }
