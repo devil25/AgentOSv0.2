@@ -3,7 +3,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 import subprocess
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -141,6 +141,22 @@ class ActionTests(unittest.TestCase):
         self.assertIn("terminal.output", [event["type"] for event in events])
         self.assertEqual(events[-1]["type"], "terminal.finished")
         self.assertEqual(events[-1]["returncode"], 0)
+
+    def test_native_action_handler_forwards_terminal_events(self):
+        process = FakeProcess(stdout=("native host stream\\n",))
+        events = []
+        payload = {
+            "protocol": "agentos.v1",
+            "type": "action.execute",
+            "action": "terminal.execute",
+            "arguments": {"command": "Write-Output test"},
+        }
+        with patch("agentos.actions.subprocess.Popen", return_value=process):
+            result = handle(payload, emit=events.append)
+        self.assertTrue(result["ok"])
+        self.assertEqual(events[0]["type"], "terminal.started")
+        self.assertEqual(events[-1]["type"], "terminal.finished")
+        self.assertIn("terminal.output", [event["type"] for event in events])
 
     def test_terminal_execute_returns_partial_output_on_timeout(self):
         process = FakeProcess(
