@@ -66,7 +66,7 @@
 
   function requiresUnfinishedStagedTask(state) {
     const task = String(state?.initialPrompt || state?.task || "");
-    const match = task.match(/\\b(\\d{1,3})\\s+stages?\\b|\\b(?:stage|step)\\s*0*1\\s*\\/\\s*(\\d{1,3})/i);
+    const match = task.match(/\b(\d{1,3})\s+stages?\b|\b(?:stage|step)\s*0*1\s*\/\s*(\d{1,3})/i);
     const total = Number(match?.[1] || match?.[2] || 0);
     if (total < 2) return false;
     const history = Array.isArray(state?.actionHistory) ? state.actionHistory : [];
@@ -76,7 +76,7 @@
       const args = entry?.arguments || {};
       const result = entry?.result || {};
       const command = String(args.command || "");
-      const output = String(result.stdout || "") + "\\n" + String(result.stderr || "");
+      const output = String(result.stdout || "") + "\n" + String(result.stderr || "");
       return result.ok === true && command.includes(finalMarker) && output.includes(finalPass);
     });
   }
@@ -96,7 +96,7 @@
       buildContinuationPrompt(state),
       "PREVIOUS NON-ACTION RESPONSE (for diagnosis only; it was not executed):",
       prior
-    ].join("\\n\\n");
+    ].join("\n\n");
   }
 
   const api = Object.freeze({
