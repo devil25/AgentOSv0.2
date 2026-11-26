@@ -270,7 +270,7 @@ test("continuation treats the AgentOS task ID as canonical and workspace IDs as 
     }]
   });
 
-  assert.match(prompt, /STABLE AGENTOS TASK ID:[\\s\\S]*task-current-run-002/);
+  assert.match(prompt, /STABLE AGENTOS TASK ID:[\s\S]*task-current-run-002/);
   assert.match(prompt, /sole canonical identity of this running task/);
   assert.match(prompt, /Conversation IDs and runtime\/session IDs may change/);
   assert.match(prompt, /Never replace, regenerate, or infer the canonical AgentOS task ID/);
