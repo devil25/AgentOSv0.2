@@ -105,6 +105,8 @@ Waiting for terminal.execute…</pre>
       <div class="card timeline-card">
         <div class="timeline-heading"><div><div class="eyebrow">TASK TIMELINE</div><div class="card-title">Execution history</div></div><span class="timeline-count" id="activityCount">0 events</span></div>
         <div id="activityTimeline" class="timeline"><div class="timeline-empty">Activity will appear here when a task starts.</div></div>
+        <div class="row task-maintenance-actions"><button id="permanentStopBtn" class="btn danger">Stop task permanently</button><button id="clearTaskHistoryBtn" class="btn secondary">Clear stuck task history</button></div>
+        <p class="muted hint">Permanent stop cancels the task after any in-flight action finishes. Clear history removes only the selected task record; it never deletes project files.</p>
       </div>
 
       <p class="activity-note">Live output is streamed from the local Windows runtime. Stop takes effect after the current action finishes; it does not forcibly terminate an in-flight command. The agent continues working if this sidebar is closed.</p>
