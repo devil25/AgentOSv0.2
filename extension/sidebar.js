@@ -239,6 +239,9 @@ function renderTaskState(state) {
     "submitting_prompt", "awaiting_model", "response_ready", "awaiting_approval",
     "executing", "action_completed", "paused"
   ].includes(state.phase);
+  $("resumeTaskBtn").textContent = state.phase === "submitting_prompt"
+    ? "Resolve stuck handoff safely (no resend)"
+    : "Resume saved task";
   $("approvalCard").hidden = state.phase !== "awaiting_approval" || !state.action;
   if (state.action) {
     $("approvalDetails").textContent = JSON.stringify({
