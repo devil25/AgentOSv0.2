@@ -14,7 +14,9 @@ if (!taskContinuation) {
   throw new Error("AgentOS task continuation helpers were not loaded.");
 }
 const {
-  buildTaskRunContext,\n  buildInitialTaskPrompt,\n  buildContinuationPrompt,
+  buildTaskRunContext,
+  buildInitialTaskPrompt,
+  buildContinuationPrompt,
   requiresAgentAction,
   requiresUnfinishedStagedTask,
   nextNonActionRetryCount,
