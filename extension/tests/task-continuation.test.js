@@ -146,6 +146,20 @@ test("stage ledger does not pass a command without its current execution pass ma
   assert.equal(state.stageLedger["7"].resultEvidence, "missing-stage-pass-marker");
 });
 
+test("stage numbers from a different stage plan cannot satisfy or block this task", () => {
+  const { isStageAlreadyPassed, requiresUnfinishedStagedTask } = require("../task-continuation.js");
+  const state = {
+    task: "Run all 25 stages.",
+    stageLedger: { "25": { number: 25, total: 30, status: "passed" } }
+  };
+  const action = {
+    action: "terminal.execute",
+    arguments: { command: "Write-Output 'HANDOFF_STAGE=25/25'; Write-Output 'STAGE_25_PASS'" }
+  };
+  assert.equal(isStageAlreadyPassed(state, action), false);
+  assert.equal(requiresUnfinishedStagedTask(state), true);
+});
+
 test("ambiguous and non-stage terminal commands are not blocked by the stage ledger", () => {
   const { isStageAlreadyPassed, getStageDescriptor } = require("../task-continuation.js");
   assert.equal(getStageDescriptor({

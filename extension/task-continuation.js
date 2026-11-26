@@ -71,7 +71,7 @@
     if (total < 2) return false;
     const history = Array.isArray(state?.actionHistory) ? state.actionHistory : [];
     const finalLedgerEntry = state?.stageLedger?.[String(total)];
-    if (finalLedgerEntry) return finalLedgerEntry.status !== "passed";
+    if (finalLedgerEntry?.total === total) return finalLedgerEntry.status !== "passed";
     const finalMarker = "HANDOFF_STAGE=" + String(total).padStart(2, "0") + "/" + total;
     const finalPass = "STAGE_" + String(total).padStart(2, "0") + "_PASS";
     return !history.some(entry => {
@@ -99,7 +99,8 @@
     const descriptor = getStageDescriptor(action);
     if (!descriptor) return state?.stageLedger && typeof state.stageLedger === "object" ? state.stageLedger : {};
     const ledger = { ...(state?.stageLedger || {}) };
-    const previous = ledger[descriptor.key] || {};
+    const existing = ledger[descriptor.key] || {};
+    const previous = existing.total === descriptor.total ? existing : {};
     ledger[descriptor.key] = {
       number: descriptor.number,
       total: descriptor.total,
@@ -117,7 +118,8 @@
     const descriptor = getStageDescriptor(actionEntry);
     const ledger = { ...(state?.stageLedger || {}) };
     if (!descriptor) return ledger;
-    const previous = ledger[descriptor.key] || {};
+    const existing = ledger[descriptor.key] || {};
+    const previous = existing.total === descriptor.total ? existing : {};
     const result = actionEntry?.result || {};
     const output = String(result.stdout || "") + "\n" + String(result.stderr || "");
     const passMarker = "STAGE_" + String(descriptor.number).padStart(2, "0") + "_PASS";
@@ -141,7 +143,8 @@
 
   function isStageAlreadyPassed(state, action) {
     const descriptor = getStageDescriptor(action);
-    return Boolean(descriptor && state?.stageLedger?.[descriptor.key]?.status === "passed");
+    const entry = descriptor ? state?.stageLedger?.[descriptor.key] : null;
+    return Boolean(entry && entry.total === descriptor.total && entry.status === "passed");
   }
 
   function nextDuplicateStageRetryCount(state) {
