@@ -174,6 +174,51 @@
     return retries < 2 ? retries + 1 : null;
   }
 
+  // Only protocol-exhaustion errors are eligible for late-response recovery.
+  // Other errors (timeouts, identity conflicts, native-host failures, etc.) stay
+  // terminal until their own explicit recovery path is used.
+  function isRecoverableNonActionProtocolError(state) {
+    if (state?.phase !== "error" || Number(state?.nonActionRetries || 0) < 2) return false;
+    const error = String(state?.error || "");
+    return error === "The AI website returned ordinary text instead of the next required AgentOS action. The staged task is still incomplete; no completion was recorded. Resume after inspecting the conversation." ||
+      error === "The AI website returned ordinary text instead of a valid AgentOS action after the bounded protocol-recovery attempts. No action was executed. Inspect the AI response before retrying.";
+  }
+
+  // A late response is recoverable only when it is demonstrably newer than the
+  // exact assistant response that exhausted the recovery budget.
+  function canRecoverFromNonActionProtocolError(state, response, messageIds = []) {
+    if (!isRecoverableNonActionProtocolError(state) ||
+        typeof response !== "string" || !response.trim()) return false;
+
+    const previousIds = Array.isArray(state?.protocolRecovery?.messageIds)
+      ? state.protocolRecovery.messageIds.filter(id => typeof id === "string" && id.trim())
+      : [];
+    const currentIds = Array.isArray(messageIds)
+      ? messageIds.filter(id => typeof id === "string" && id.trim())
+      : [];
+
+    if (previousIds.length && currentIds.length) {
+      const previous = new Set(previousIds);
+      return currentIds.some(id => !previous.has(id));
+    }
+
+    const previousResponse = typeof state?.protocolRecovery?.response === "string"
+      ? state.protocolRecovery.response
+      : typeof state?.response === "string" ? state.response : "";
+    return response.trim() !== previousResponse.trim();
+  }
+
+  function recoverNonActionProtocolState(state, response, messageIds = []) {
+    if (!canRecoverFromNonActionProtocolError(state, response, messageIds)) return null;
+    return {
+      ...state,
+      phase: "awaiting_model",
+      response: null,
+      finalResponse: null,
+      error: null
+    };
+  }
+
   function buildNonActionRetryPrompt(state, previousResponse) {
     const prior = clipped(previousResponse, 1200);
     return [
@@ -192,6 +237,9 @@
     requiresAgentAction,
     requiresUnfinishedStagedTask,
     nextNonActionRetryCount,
+    isRecoverableNonActionProtocolError,
+    canRecoverFromNonActionProtocolError,
+    recoverNonActionProtocolState,
     getStageDescriptor,
     beginStageAttempt,
     recordStageResult,
