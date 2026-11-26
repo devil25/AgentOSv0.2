@@ -62,7 +62,7 @@
       "Compare task IDs only after confirming that the artifact belongs to this run. A stale or foreign artifact ID is an artifact-contamination finding; it is not proof that AgentOS changed the current task identity and must not cause you to restart the task or falsely fail a verified handoff.",
       "A task-identity continuity failure may be reported only if the canonical AgentOS task ID in the persisted AgentOS continuation state actually changes. If the state ID is unavailable, report UNKNOWN; do not substitute an ID from workspace evidence.",
       "Before finalizing, report canonical_task_id, artifact_task_ids, artifact_run_binding, and task_identity_continuity separately. Keep all original conflicting evidence intact.",
-      "PERSISTED STAGE LEDGER (authoritative; never re-run a stage recorded as passed):
+      "PERSISTED STAGE LEDGER (authoritative; never re-run a stage recorded as passed):",
       JSON.stringify(state?.stageLedger || {}, null, 2),
       "AUTOMATIC CONTEXT HANDOFF EVENT LEDGER (provider-confirmed evidence only):",
       JSON.stringify(state?.handoffEvents || [], null, 2),
