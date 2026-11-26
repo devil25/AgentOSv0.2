@@ -44,8 +44,9 @@ jobs:
           node --check extension/provider-adapters.js
           node --check extension/action-parser.js
           node --check extension/conversation-identity.js
+          node --check extension/task-continuation.js
           node --check extension/sidebar.js
-          node --test extension/tests/action-parser.test.js extension/tests/provider-adapters.test.js extension/tests/conversation-identity.test.js
+          node --test extension/tests/action-parser.test.js extension/tests/provider-adapters.test.js extension/tests/conversation-identity.test.js extension/tests/task-continuation.test.js
       - name: Package unsigned Firefox XPI
         run: |
           cd extension
