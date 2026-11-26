@@ -254,7 +254,22 @@ def execute(action, args, emit=None):
         if timed_out:
             returncode = None
         else:
-            returncode = process.wait()
+            try:
+                # A process may close both output pipes and continue running.
+                # Keep the timeout active while waiting for its actual exit.
+                returncode = process.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                returncode = None
 
         elapsed_ms = int((time.monotonic() - started_clock) * 1000)
         result = {
