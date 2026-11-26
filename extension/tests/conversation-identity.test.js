@@ -122,7 +122,18 @@ test("never carries the old ChatGPT identity when the handoff cannot provide a n
     provider: "chatgpt",
     providerUrl: "https://chatgpt.com/c/old",
     providerConversationId: "old-conversation"
-  }, { handedOff: true, url: "https://chatgpt.com/" });
+  }, {
+    ok: true, handedOff: true, contextWindowFullObserved: true,
+    triggerReason: "chatgpt-context-window-full",
+    fromUrl: "https://chatgpt.com/c/old",
+    toUrl: "https://chatgpt.com/",
+    fromConversationId: "old-conversation",
+    toConversationId: null,
+    url: "https://chatgpt.com/",
+    conversationId: null,
+    continuationMarker: false,
+    verification: "context-window-trigger-and-url-change"
+  });
   assert.equal(next.providerConversationId, null);
 });
 

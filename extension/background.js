@@ -559,7 +559,7 @@ async function processAction(state, approved) {
   }
   if (await isStopped()) return;
   const stageLedgerAtStart = beginStageAttempt(state, state.action);
-  await writeTaskState({
+  const executingState = await writeTaskState({
     ...state, phase: "executing",
     ...(state.action?.action === "terminal.execute" ? { stageLedger: stageLedgerAtStart } : {})
   });
@@ -573,7 +573,7 @@ async function processAction(state, approved) {
     lastResult
   ].slice(-MAX_STEPS);
   // Reset the bounded recovery budget after each valid action.
-  const stageLedger = recordStageResult(state, lastResult);
+  const stageLedger = recordStageResult(executingState, lastResult);
   const continuedState = {
     ...state, steps, lastResult, actionHistory, nonActionRetries: 0,
     duplicateStageRetries: 0,

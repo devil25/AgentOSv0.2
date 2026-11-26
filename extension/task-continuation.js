@@ -120,7 +120,7 @@
     const result = actionEntry?.result || {};
     const output = String(result.stdout || "") + "\\n" + String(result.stderr || "");
     const passMarker = "STAGE_" + String(descriptor.number).padStart(2, "0") + "_PASS";
-    const markerPattern = new RegExp("(?:^|[^A-Z0-9_])" + passMarker + "(?:$|[^A-Z0-9_])", "i");
+    const markerPattern = new RegExp("^\\s*" + passMarker + "\\s*$", "im");
     const succeeded = result.ok === true &&
       (result.returncode === undefined || result.returncode === null || result.returncode === 0) &&
       result.timed_out !== true &&

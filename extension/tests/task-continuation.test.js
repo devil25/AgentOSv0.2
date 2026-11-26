@@ -140,7 +140,7 @@ test("stage ledger does not pass a command without its current execution pass ma
   let state = { stageLedger: {} };
   state.stageLedger = beginStageAttempt(state, action);
   state.stageLedger = recordStageResult(state, {
-    ...action, result: { ok: true, returncode: 0, stdout: "An old log says STAGE_07_PASS", stderr: "" }
+    ...action, result: { ok: true, returncode: 0, stdout: "An old log says STAGE_07_PASS\\n", stderr: "" }
   });
   assert.equal(state.stageLedger["7"].status, "failed");
   assert.equal(state.stageLedger["7"].resultEvidence, "missing-stage-pass-marker");
