@@ -64,22 +64,46 @@
     return /terminal\.execute|workspace\.(?:list|read_file|create_file)|powershell|power\s*shell|execute\s+(?:the\s+)?(?:command|steps|stages)|run\s+(?:the\s+)?(?:\d+|[a-z]+)\s+stages|hand.?off.*(?:test|regression)|(?:stage|step)\s*0*1\s*\/\s*\d+/i.test(task);
   }
 
+  function requiresUnfinishedStagedTask(state) {
+    const task = String(state?.initialPrompt || state?.task || "");
+    const match = task.match(/\\b(\\d{1,3})\\s+stages?\\b|\\b(?:stage|step)\\s*0*1\\s*\\/\\s*(\\d{1,3})/i);
+    const total = Number(match?.[1] || match?.[2] || 0);
+    if (total < 2) return false;
+    const history = Array.isArray(state?.actionHistory) ? state.actionHistory : [];
+    const finalMarker = "HANDOFF_STAGE=" + String(total).padStart(2, "0") + "/" + total;
+    const finalPass = "STAGE_" + String(total).padStart(2, "0") + "_PASS";
+    return !history.some(entry => {
+      const args = entry?.arguments || {};
+      const result = entry?.result || {};
+      const command = String(args.command || "");
+      const output = String(result.stdout || "") + "\\n" + String(result.stderr || "");
+      return result.ok === true && command.includes(finalMarker) && output.includes(finalPass);
+    });
+  }
+
+  function nextNonActionRetryCount(state) {
+    const retries = Number(state?.nonActionRetries || 0);
+    return retries < 2 ? retries + 1 : null;
+  }
+
   function buildNonActionRetryPrompt(state, previousResponse) {
     const prior = clipped(previousResponse, 1200);
     return [
-      "AGENTOS ACTION PROTOCOL RECOVERY — ONE RETRY",
-      "Your previous response did not contain a valid AgentOS action envelope. AgentOS has not executed any action for this task yet. Do not claim that the task is complete and do not provide a plan or ordinary prose.",
-      "Re-read the complete original AgentOS instructions and user task below. Begin the task now by emitting exactly ONE valid fenced JSON action envelope. Use terminal.execute for the requested PowerShell inspection. Do not combine multiple stages in one command.",
+      "AGENTOS ACTION PROTOCOL RECOVERY",
+      "Your previous response did not contain a valid AgentOS action envelope. That response executed no action. Earlier successful actions, if any, remain recorded in the persisted action history below. Do not claim that the task is complete and do not provide a plan or ordinary prose.",
+      "Re-read the complete original AgentOS instructions and execution ledger. Continue the SAME task from the first stage or requirement that has not succeeded. Never repeat a successful action. Emit exactly ONE valid fenced JSON action envelope for the next required action; do not combine multiple stages in one command.",
       "The next message must contain the action envelope only.",
       buildContinuationPrompt(state),
       "PREVIOUS NON-ACTION RESPONSE (for diagnosis only; it was not executed):",
       prior
-    ].join("\n\n");
+    ].join("\\n\\n");
   }
 
   const api = Object.freeze({
     buildContinuationPrompt,
     requiresAgentAction,
+    requiresUnfinishedStagedTask,
+    nextNonActionRetryCount,
     buildNonActionRetryPrompt
   });
   globalThis.AgentOSTaskContinuation = api;
