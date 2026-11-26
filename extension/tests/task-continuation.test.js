@@ -77,3 +77,31 @@ test("builds one bounded action-protocol recovery prompt without claiming execut
   assert.match(prompt, /exactly ONE valid fenced JSON action envelope/);
   assert.match(prompt, /I will start by checking the project/);
 });
+
+
+test("keeps a numbered multi-stage task incomplete until its final stage succeeds", () => {
+  const { requiresUnfinishedStagedTask } = require("../task-continuation.js");
+  const state = {
+    task: "Run the following 25 stages, one terminal call per stage.",
+    steps: 9,
+    actionHistory: [{
+      action: "terminal.execute",
+      arguments: { command: "Write-Output 'HANDOFF_STAGE=09/25'; Write-Output 'STAGE_09_PASS'" },
+      result: { ok: true, stdout: "HANDOFF_STAGE=09/25\\nSTAGE_09_PASS" }
+    }]
+  };
+  assert.equal(requiresUnfinishedStagedTask(state), true);
+  state.actionHistory.push({
+    action: "terminal.execute",
+    arguments: { command: "Write-Output 'HANDOFF_STAGE=25/25'; Write-Output 'STAGE_25_PASS'" },
+    result: { ok: true, stdout: "HANDOFF_STAGE=25/25\\nSTAGE_25_PASS" }
+  });
+  assert.equal(requiresUnfinishedStagedTask(state), false);
+});
+
+test("bounds non-action recovery attempts", () => {
+  const { nextNonActionRetryCount } = require("../task-continuation.js");
+  assert.equal(nextNonActionRetryCount({ nonActionRetries: 0 }), 1);
+  assert.equal(nextNonActionRetryCount({ nonActionRetries: 1 }), 2);
+  assert.equal(nextNonActionRetryCount({ nonActionRetries: 2 }), null);
+});
