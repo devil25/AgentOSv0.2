@@ -56,6 +56,13 @@
     return ids.length === 1 ? ids[0] : null;
   }
 
+  function isChatGPTContinuationReady(beforeId, currentId, continuationMarker = false) {
+    const before = typeof beforeId === "string" ? beforeId.trim() : "";
+    const current = typeof currentId === "string" ? currentId.trim() : "";
+    if (before) return Boolean(current && current !== before);
+    return Boolean(current || continuationMarker === true);
+  }
+
   // Do not mistake unrelated page buttons named "Stop" for a live generation
   // control. Providers expose the active-generation state with more specific labels.
   function isGenerationControlLabel(value) {
@@ -72,6 +79,7 @@
       CHATGPT_CONVERSATION_ID_SELECTOR,
       resolveChatGPTMessageId,
       resolveChatGPTConversationId,
+      isChatGPTContinuationReady,
       isGenerationControlLabel
     });
     return;
@@ -399,6 +407,7 @@
     if (provider?.id !== "chatgpt") return { ok: true, handedOff: false, url: location.href };
 
     const beforeUrl = location.href;
+    const beforeConversationId = getChatGPTConversationId();
     const buttons = [...document.querySelectorAll("button")].filter(visible);
     let target = null;
     for (const button of buttons) {
@@ -429,11 +438,29 @@
           return Boolean(node && (node.innerText || "").toLowerCase().includes("context window full"));
         })
       );
-      if (location.href !== beforeUrl && composer && !modalStillOpen) {
-        return { ok: true, handedOff: true, url: location.href };
+      const currentConversationId = getChatGPTConversationId();
+      const identityReady = isChatGPTContinuationReady(
+        beforeConversationId,
+        currentConversationId,
+        hasChatGPTContinuationMarker()
+      );
+      if (location.href !== beforeUrl && composer && !modalStillOpen && identityReady) {
+        return {
+          ok: true,
+          handedOff: true,
+          url: location.href,
+          conversationId: currentConversationId,
+          continuationMarker: hasChatGPTContinuationMarker()
+        };
       }
     }
-    return { ok: false, handedOff: true, error: "ChatGPT's New chat button was clicked, but the new conversation did not become ready within 30 seconds.", url: location.href };
+    return {
+      ok: false,
+      handedOff: true,
+      error: "ChatGPT's New chat button was clicked, but the new conversation identity did not become ready within 30 seconds.",
+      url: location.href,
+      conversationId: getChatGPTConversationId()
+    };
   }
 
   async function inspect() {

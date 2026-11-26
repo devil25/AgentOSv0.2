@@ -5,6 +5,7 @@ const ACTIVE_TASK_KEY = "agentos.activeTaskId";
 const STOP_KEY = "agentos.stopped";
 const MAX_STEPS = 40;
 const RESPONSE_TIMEOUT_MINUTES = 8;
+let terminalInvocationSequence = 0;
 const AUTONOMOUS_ACTIONS = new Set([
   // Read-only discovery plus workspace-scoped project actions can run without
   // per-step approval. External plugin/MCP calls and browser navigation remain supervised.
@@ -114,9 +115,14 @@ async function setActiveTask(taskId) {
 }
 function chatGPTConversationIdentityMatches(state, conversationId) {
   if (state?.provider !== "chatgpt" || typeof conversationId !== "string" || !conversationId) return false;
-  if (state.providerConversationId && state.providerConversationId === conversationId) return true;
-  // Backward compatibility: older saved tasks stored ChatGPT's temporary URL
-  // but did not persist the equivalent DOM conversation identity separately.
+
+  // The visible DOM identity is authoritative. ChatGPT's local-chatgpt URL
+  // token is a separate identifier and must not override a known DOM identity.
+  if (state.providerConversationId) {
+    return state.providerConversationId === conversationId;
+  }
+
+  // Backward compatibility for saved tasks that predate DOM identity storage.
   try {
     const parsed = new URL(state.providerUrl);
     const match = decodeURIComponent(parsed.pathname).match(/^\/c\/(local-chatgpt:.+)$/i);
@@ -126,10 +132,23 @@ function chatGPTConversationIdentityMatches(state, conversationId) {
 
 function sameConversation(a, provider, url, conversationId = null) {
   if (a?.provider !== provider) return false;
+
+  // When both sides expose ChatGPT's DOM identity, do not accept a URL-only
+  // match if those identities disagree.
+  if (provider === "chatgpt" && a.providerConversationId) {
+    return a.providerConversationId === conversationId;
+  }
+
   if (a.providerUrl && url) {
-    try { const oldUrl = new URL(a.providerUrl), newUrl = new URL(url); if (oldUrl.origin === newUrl.origin && oldUrl.pathname === newUrl.pathname) return true; }
-    catch (_) { if (a.providerUrl === url) return true; }
-  } else if (a.providerUrl === url) return true;
+    try {
+      const oldUrl = new URL(a.providerUrl), newUrl = new URL(url);
+      if (oldUrl.origin === newUrl.origin && oldUrl.pathname === newUrl.pathname) return true;
+    } catch (_) {
+      if (a.providerUrl === url) return true;
+    }
+  } else if (a.providerUrl === url) {
+    return true;
+  }
   return provider === "chatgpt" && chatGPTConversationIdentityMatches(a, conversationId);
 }
 function isChatGPTContinuationUrl(provider, url) {
@@ -226,6 +245,9 @@ async function nativeRequest(payload) {
       : isTerminalAction
         ? (Math.min(Math.max(requestedTerminalTimeout, 1), 600) + 15000) * 1000
         : 15000;
+    const terminalId = isTerminalAction
+      ? (payload?.task_id || "task") + ":terminal:" + Date.now() + ":" + (++terminalInvocationSequence)
+      : null;
     timer = setTimeout(() => finish({ ok: false, error: "Native host timeout" }), timeoutMs);
     port.onMessage.addListener((message) => {
       if (message?.agentos_event === true) {
@@ -233,7 +255,7 @@ async function nativeRequest(payload) {
           Promise.resolve(api.runtime.sendMessage({
             type: "AGENTOS_TERMINAL_EVENT",
             taskId: payload?.task_id || null,
-            event: message
+            event: terminalId ? { ...message, terminalId } : message
           })).catch(() => {});
         } catch (_) {}
         return;
@@ -248,7 +270,39 @@ async function nativeRequest(payload) {
 }
 async function tabRequest(tabId, type, extra = {}) {
   if (!Number.isInteger(tabId)) throw new Error("The AI website tab is no longer available.");
-  return api.tabs.sendMessage(tabId, { type, ...extra });
+  const timeoutMs = type === "AGENTOS_PROVIDER_HANDOFF" ? 35000
+    : type === "AGENTOS_PROVIDER_SUBMIT" ? 16000
+    : type === "AGENTOS_PROVIDER_READ" ? 12000
+    : 10000;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Timed out waiting for the AI website (" + type + "). The prompt was not automatically resent."));
+    }, timeoutMs);
+
+    let request;
+    try {
+      request = api.tabs.sendMessage(tabId, { type, ...extra });
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+      return;
+    }
+    Promise.resolve(request).then(value => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    }, error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 async function readProviderMessages(tabId) {
   const result = await tabRequest(tabId, "AGENTOS_PROVIDER_READ");
@@ -303,57 +357,125 @@ function responseDelta(messages, baseline, messageIds = [], baselineMessageIds =
 async function sendPrompt(state, prompt) {
   if (await isStopped()) return;
 
-  // ChatGPT can block further messages when its context window is full.
-  // Click the New chat button in that specific notice, then wait for the
-  // continuation conversation to become active before sending the same task.
-  if (state.provider === "chatgpt") {
-    const handoff = await tabRequest(state.tabId, "AGENTOS_PROVIDER_HANDOFF");
-    if (handoff?.handedOff && handoff.url) {
-      state = await writeTaskState({
-        ...state,
-        tabId: state.tabId,
-        providerUrl: handoff.url,
-        conversationTransfer: {
-          ...(state.conversationTransfer || {}),
-          from: state.providerUrl,
-          to: handoff.url,
-          at: new Date().toISOString(),
-          method: "chatgpt-context-window-new-chat"
-        }
+  let submitting = null;
+  let stage = "checking the conversation";
+  try {
+    // ChatGPT can block further messages when its context window is full.
+    // A handoff starts a new conversation, so discard the old DOM identity.
+    if (state.provider === "chatgpt") {
+      stage = "checking ChatGPT context window";
+      const handoff = await tabRequest(state.tabId, "AGENTOS_PROVIDER_HANDOFF");
+      if (handoff?.handedOff && handoff.url) {
+        state = await writeTaskState({
+          ...state,
+          tabId: state.tabId,
+          providerUrl: handoff.url,
+          providerConversationId: null,
+          conversationTransfer: {
+            ...(state.conversationTransfer || {}),
+            from: state.providerUrl,
+            to: handoff.url,
+            observedUrl: handoff.url,
+            at: new Date().toISOString(),
+            method: "chatgpt-context-window-new-chat"
+          }
+        });
+      } else if (handoff?.ok === false) {
+        throw new Error(handoff.error || "ChatGPT conversation handoff failed.");
+      }
+    }
+
+    stage = "reading the active conversation";
+    const snapshot = await readProviderMessages(state.tabId);
+    const submittingState = await writeTaskState({
+      ...state,
+      phase: "submitting_prompt",
+      prompt,
+      baseline: snapshot.messages,
+      baselineMessageIds: snapshot.messageIds || [],
+      providerUrl: snapshot.url || state.providerUrl,
+      // Never carry the previous conversation's identity across a handoff.
+      providerConversationId: snapshot.conversationId || null,
+      response: null,
+      action: null,
+      error: null,
+      promptSubmissionStage: "ready"
+    });
+    submitting = submittingState;
+
+    stage = "filling the prompt";
+    const fill = await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_FILL", { prompt });
+    if (!fill?.ok || fill.filled !== true) {
+      throw new Error(fill?.error || "The AI website did not confirm that the prompt was filled.");
+    }
+
+    stage = "submitting the prompt";
+    const submitted = await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_SUBMIT");
+    if (!submitted?.ok || submitted.submitted !== true) {
+      throw new Error(submitted?.error || "The AI website did not confirm prompt submission.");
+    }
+
+    // Submission is confirmed. Inspection is best-effort because some providers
+    // update their SPA URL/DOM identity a moment after accepting the prompt.
+    let providerUrl = submitting.providerUrl;
+    let providerConversationId = submitting.providerConversationId;
+    try {
+      stage = "verifying the conversation";
+      const info = await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_INSPECT");
+      if (info?.ok && info.provider === submitting.provider) {
+        providerUrl = info.url || providerUrl;
+        providerConversationId = info.conversationId || providerConversationId;
+      }
+    } catch (_) {}
+
+    if (await isStopped()) {
+      await writeTaskState({
+        ...submitting,
+        phase: "cancelled",
+        action: null,
+        error: "Task permanently stopped by the user."
       });
-    } else if (handoff?.ok === false) {
-      await writeTaskState({ ...state, phase: "error", error: handoff.error || "ChatGPT conversation handoff failed." });
       return;
     }
-  }
 
-  const snapshot = await readProviderMessages(state.tabId);
-  const baseline = snapshot.messages;
-  const submitting = await writeTaskState({
-    ...state, phase: "submitting_prompt", prompt, baseline,
-    baselineMessageIds: snapshot.messageIds || [],
-    providerUrl: snapshot.url || state.providerUrl,
-    providerConversationId: snapshot.conversationId || state.providerConversationId || null,
-    response: null, action: null, error: null
-  });
-  await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_FILL", { prompt });
-  await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_SUBMIT");
-  let providerUrl = submitting.providerUrl;
-  try {
-    const info = await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_INSPECT");
-    if (info?.ok && info.url) providerUrl = info.url;
-  } catch (_) {}
-  if (await isStopped()) {
-    await writeTaskState({ ...submitting, phase: "cancelled", action: null, error: "Task permanently stopped by the user." });
-    return;
+    const next = await writeTaskState({
+      ...submitting,
+      phase: "awaiting_model",
+      providerUrl,
+      providerConversationId,
+      promptSubmissionStage: "submitted"
+    });
+    try {
+      await api.alarms.clear("agentos-response-timeout");
+      await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
+      // The provider observer delivers a stable assistant snapshot after generation.
+    } catch (_) {}
+  } catch (error) {
+    const latest = await readTaskState();
+    if (latest?.id !== state.id || latest?.phase === "cancelled") return;
+    if (await isStopped()) {
+      await writeTaskState({
+        ...(submitting || latest || state),
+        phase: "cancelled",
+        action: null,
+        error: "Task permanently stopped while submitting the prompt."
+      });
+      return;
+    }
+    const base = submitting || latest || state;
+    const mayHaveSubmitted = stage === "submitting the prompt" || stage === "verifying the conversation";
+    await writeTaskState({
+      ...base,
+      phase: "error",
+      action: null,
+      response: null,
+      error: "Prompt handoff failed while " + stage + ": " +
+        String(error?.message || error) +
+        ". AgentOS did not automatically resend the prompt." +
+        (mayHaveSubmitted ? " The prompt may already be present in the AI conversation; inspect that conversation before resuming." : ""),
+      promptSubmissionStage: stage
+    });
   }
-  const next = await writeTaskState({ ...submitting, phase: "awaiting_model", providerUrl });
-  try {
-    await api.alarms.clear("agentos-response-timeout");
-    await api.alarms.create("agentos-response-timeout", { delayInMinutes: RESPONSE_TIMEOUT_MINUTES });
-    // Do not interpret an immediate DOM read as a model response.
-    // The provider observer will deliver a stable assistant snapshot after generation.
-  } catch (_) {}
 }
 function validateAction(command) {
   if (!command || command.protocol !== "agentos.v1" || command.type !== "action") return "Invalid AgentOS action envelope.";
