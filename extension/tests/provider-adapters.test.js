@@ -63,3 +63,14 @@ test("uses a unique ChatGPT DOM conversation identity across URL changes", () =>
   assert.equal(resolveChatGPTConversationId(["local-chatgpt:abc", "local-chatgpt:other"]), null);
   assert.equal(resolveChatGPTConversationId([]), null);
 });
+
+test("recognizes specific active-generation controls without false-positive Stop buttons", () => {
+  const { isGenerationControlLabel } = require("../provider-adapters.js");
+  assert.equal(isGenerationControlLabel("Stop generating"), true);
+  assert.equal(isGenerationControlLabel("Stop response"), true);
+  assert.equal(isGenerationControlLabel("Cancel response"), true);
+  assert.equal(isGenerationControlLabel("إيقاف التوليد"), true);
+  assert.equal(isGenerationControlLabel("Stop"), false);
+  assert.equal(isGenerationControlLabel("Stop sharing"), false);
+  assert.equal(isGenerationControlLabel("Submit"), false);
+});
