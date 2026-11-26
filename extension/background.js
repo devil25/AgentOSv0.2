@@ -52,7 +52,8 @@ function activityForState(state, previous) {
     paused: "Task paused",
     interrupted: "Task interrupted",
     error: "Task failed",
-    step_limit: "Step limit reached"
+    step_limit: "Step limit reached",
+    cancelled: "Task permanently stopped"
   };
   const entry = {
     id: (state.id || "task") + ":" + Date.now() + ":" + state.phase,
@@ -342,6 +343,10 @@ async function sendPrompt(state, prompt) {
     const info = await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_INSPECT");
     if (info?.ok && info.url) providerUrl = info.url;
   } catch (_) {}
+  if (await isStopped()) {
+    await writeTaskState({ ...submitting, phase: "cancelled", action: null, error: "Task permanently stopped by the user." });
+    return;
+  }
   const next = await writeTaskState({ ...submitting, phase: "awaiting_model", providerUrl });
   try {
     await api.alarms.clear("agentos-response-timeout");
@@ -441,6 +446,10 @@ async function processAction(state, approved) {
     ...state, phase: "action_completed", steps, lastResult,
     prompt, action: null, response: null, approvalGranted: false
   });
+  if (await isStopped()) {
+    await writeTaskState({ ...completed, phase: "cancelled", action: null, error: "Task permanently stopped by the user." });
+    return;
+  }
   if (steps >= MAX_STEPS) {
     await writeTaskState({ ...completed, phase: "step_limit" });
     return;
@@ -669,6 +678,37 @@ async function resumeTask(taskId) {
   }
   return { ok: true, state: await readTaskState() };
 }
+async function permanentlyStopTask() {
+  await setStopped(true);
+  await api.alarms.clear("agentos-response-timeout");
+  const state = await readTaskState();
+  if (!state) return { ok: true, stopped: true, pending: false, state: null };
+  if (["executing", "submitting_prompt"].includes(state.phase)) {
+    return { ok: true, stopped: true, pending: true, state,
+      message: "Stop requested. The current action/prompt handoff will finish safely; no next step will start." };
+  }
+  const cancelled = await writeTaskState({
+    ...state, phase: "cancelled", action: null, approvalGranted: false,
+    resumePhase: null, error: "Task permanently stopped by the user."
+  });
+  return { ok: true, stopped: true, pending: false, state: cancelled };
+}
+async function clearActiveTaskHistory() {
+  const stored = await api.storage.local.get([TASK_STATE_KEY, TASKS_KEY, ACTIVE_TASK_KEY]);
+  const tasks = stored[TASKS_KEY] && typeof stored[TASKS_KEY] === "object" ? { ...stored[TASKS_KEY] } : {};
+  const id = stored[ACTIVE_TASK_KEY] || stored[TASK_STATE_KEY]?.id;
+  const state = id ? tasks[id] || stored[TASK_STATE_KEY] : null;
+  if (state && ["executing", "submitting_prompt"].includes(state.phase)) {
+    return { ok: false, error: "Cannot clear history while an action or prompt handoff is still running. Permanently stop it and wait until it finishes." };
+  }
+  if (id) delete tasks[id];
+  await api.storage.local.set({ [TASKS_KEY]: tasks });
+  await api.storage.local.remove([TASK_STATE_KEY, ACTIVE_TASK_KEY]);
+  await api.alarms.clear("agentos-response-timeout");
+  await setStopped(false);
+  try { await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_UPDATED", taskId: id || null, state: null }); } catch (_) {}
+  return { ok: true, cleared: true, taskId: id || null };
+}
 async function openSafeUrl(raw) {
   if (await isStopped()) return { ok: false, error: "AgentOS is stopped." };
   try {
@@ -710,6 +750,8 @@ api.runtime.onMessage.addListener((message, sender) => {
     await processAction(decided, approved);
     return { ok: true };
   });
+  if (message?.type === "AGENTOS_TASK_PERMANENT_STOP") return permanentlyStopTask();
+  if (message?.type === "AGENTOS_TASK_HISTORY_CLEAR") return clearActiveTaskHistory();
   if (message?.type === "AGENTOS_TASK_STOP") return setStopped(true).then(async () => {
     const state = await readTaskState();
     if (state && ["awaiting_model", "awaiting_approval", "action_completed"].includes(state.phase)) {
