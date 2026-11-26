@@ -80,11 +80,11 @@
   // Do not mistake unrelated page buttons named "Stop" for a live generation
   // control. Providers expose the active-generation state with more specific labels.
   function isGenerationControlLabel(value) {
-    return /stop\\s*(?:generating|response|generation|streaming)|stop[-_](?:generating|response|generation|button)|cancel\\s*(?:response|generation)|cancel[-_](?:response|generation)|إيقاف\\s*(?:التوليد|الاستجابة)/i.test(String(value || ""));
+    return /stop\s*(?:generating|response|generation|streaming)|stop[-_](?:generating|response|generation|button)|cancel\s*(?:response|generation)|cancel[-_](?:response|generation)|إيقاف\s*(?:التوليد|الاستجابة)/i.test(String(value || ""));
   }
 
   function normalizeMessageText(value) {
-    return String(value || "").replace(/\\s+/g, " ").trim().toLowerCase();
+    return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
   }
 
   function hasNewUserMessage(currentMessages, baselineMessages, submittedText) {
