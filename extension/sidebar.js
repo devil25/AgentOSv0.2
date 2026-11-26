@@ -129,8 +129,15 @@ function setTerminalRunning(running, label) {
 }
 function restoreTerminalTabs(state) {
   const entries = Array.isArray(state.activity) ? state.activity : [];
-  for (const entry of entries) {
-    if (entry.action !== "terminal.execute" || entry.phase !== "action_completed") continue;
+  const terminalHistory = entries.filter(entry =>
+    entry.action === "terminal.execute" && entry.phase === "action_completed"
+  );
+  const latestHistoryEntry = terminalHistory[terminalHistory.length - 1] || null;
+  const liveLatestExists = Boolean(latestTerminalId && terminals.has(latestTerminalId));
+  for (const entry of terminalHistory) {
+    // The most recent result is already represented by the live terminal tab
+    // when this sidebar was open during execution. Avoid creating a duplicate.
+    if (entry === latestHistoryEntry && liveLatestExists) continue;
     const id = entry.id || (state.id + ":history:" + terminalCounter);
     const record = ensureTerminal(id, {
       command: entry.command || "Terminal command",
