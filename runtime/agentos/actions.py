@@ -286,7 +286,7 @@ def execute(action, args, emit=None):
     raise ValueError("Unsupported action: " + str(action))
 
 
-def handle(payload):
+def handle(payload, emit=None):
     if not isinstance(payload, dict) or payload.get("protocol") != "agentos.v1":
         return {"ok": False, "error": "Unsupported protocol"}
 
@@ -311,7 +311,7 @@ def handle(payload):
         action = payload.get("action")
         args = payload.get("arguments", {})
         audit("action.request", {"action": action})
-        result = execute(action, args)
+        result = execute(action, args, emit=emit)
         audit("action.success", {"action": action})
         return result
     return {"ok": False, "error": "Unknown message type"}
