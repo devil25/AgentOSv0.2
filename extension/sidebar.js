@@ -109,6 +109,13 @@ function renderTimeline(activity) {
       result.textContent = "Exit code: " + entry.returncode + (entry.elapsed_ms ? " · " + entry.elapsed_ms + " ms" : "");
       content.append(result);
     }
+    if (entry.stdout || entry.stderr) {
+      const output = document.createElement("pre");
+      output.className = "timeline-command";
+      output.textContent = (entry.stdout ? "[stdout]\\n" + entry.stdout : "") +
+        (entry.stderr ? (entry.stdout ? "\\n" : "") + "[stderr]\\n" + entry.stderr : "");
+      content.append(output);
+    }
     if (entry.timed_out) {
       const timeout = document.createElement("div");
       timeout.className = "timeline-detail";
