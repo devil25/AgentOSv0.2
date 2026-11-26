@@ -88,7 +88,7 @@
   }
   
   function isChatGPTNewChatButtonLabel(value) {
-    return /^new chat(?:\\b|$)/i.test(normalizeMessageText(value));
+    return /^new chat(?:\b|$)/i.test(normalizeMessageText(value));
   }
 
   function hasNewUserMessage(currentMessages, baselineMessages, submittedText) {
