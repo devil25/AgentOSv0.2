@@ -73,8 +73,15 @@
   function isChatGPTContinuationReady(beforeId, currentId, continuationMarker = false) {
     const before = typeof beforeId === "string" ? beforeId.trim() : "";
     const current = typeof currentId === "string" ? currentId.trim() : "";
+
+    // ChatGPT's explicit "Continued from ..." marker is authoritative. A
+    // context handoff may preserve the same conversation identity, so do not
+    // require a new DOM ID when this marker is present.
+    if (continuationMarker === true) return true;
+
+    // Without the marker, require a genuinely changed ID when one was known.
     if (before) return Boolean(current && current !== before);
-    return Boolean(current || continuationMarker === true);
+    return Boolean(current);
   }
 
   // Do not mistake unrelated page buttons named "Stop" for a live generation
@@ -87,9 +94,7 @@
     return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
   }
   
-  function isChatGPTNewChatButtonLabel(value) {
-    return /^new chat(?:\b|$)/i.test(normalizeMessageText(value));
-  }
+
 
   function hasNewUserMessage(currentMessages, baselineMessages, submittedText) {
     const promptPrefix = normalizeMessageText(submittedText).slice(0, 80);
@@ -124,8 +129,7 @@
       resolveChatGPTConversationId,
       isChatGPTContinuationReady,
       isGenerationControlLabel,
-      hasNewUserMessage,
-      isChatGPTNewChatButtonLabel
+      hasNewUserMessage
     });
     return;
   }
@@ -500,18 +504,24 @@
         })
       );
       const currentConversationId = getChatGPTConversationId();
+      const continuationMarker = hasChatGPTContinuationMarker();
       const identityReady = isChatGPTContinuationReady(
         beforeConversationId,
         currentConversationId,
-        hasChatGPTContinuationMarker()
+        continuationMarker
       );
-      if (location.href !== beforeUrl && composer && !modalStillOpen && identityReady) {
+      // ChatGPT's context-window action may continue the same thread rather
+      // than create an unrelated conversation. In that case the explicit
+      // "Continued from ..." marker, a ready composer, and a dismissed
+      // context-limit dialog are sufficient even if URL and DOM ID are stable.
+      if ((location.href !== beforeUrl || continuationMarker) &&
+          composer && !modalStillOpen && identityReady) {
         return {
           ok: true,
           handedOff: true,
           url: location.href,
           conversationId: currentConversationId,
-          continuationMarker: hasChatGPTContinuationMarker()
+          continuationMarker
         };
       }
     }
@@ -604,30 +614,6 @@
       }
     }
     throw new Error("The Send control was activated, but AgentOS could not verify that ChatGPT accepted the prompt within 20 seconds. The prompt may already be present in the conversation; it was not resent. Inspect the conversation before retrying.");
-  }
-
-  // Record an explicit user click on ChatGPT's New chat control. The background
-  // controller only treats it as a handoff when this tab owns an unfinished task.
-  if (provider?.id === "chatgpt") {
-    document.addEventListener("click", event => {
-      if (!event.isTrusted) return;
-      const origin = event.target instanceof Element ? event.target : event.target?.parentElement;
-      const target = origin?.closest?.("button, [role='button'], a");
-      if (!target || !visible(target)) return;
-      const label = [
-        target.innerText, target.getAttribute("aria-label"),
-        target.getAttribute("data-testid"), target.title
-      ].filter(Boolean).join(" ");
-      if (!isChatGPTNewChatButtonLabel(label)) return;
-      try {
-        Promise.resolve(api.runtime.sendMessage({
-          type: "AGENTOS_CHATGPT_NEW_CHAT_CLICKED",
-          fromUrl: location.href,
-          fromConversationId: getChatGPTConversationId(),
-          clickedAt: new Date().toISOString()
-        })).catch(() => {});
-      } catch (_) {}
-    }, true);
   }
 
   // Observe the provider page independently of the sidebar lifetime. A quiet,
