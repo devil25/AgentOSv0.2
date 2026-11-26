@@ -9,6 +9,11 @@ const {
   isChatGPTContinuationUrl,
   applyChatGPTHandoff
 } = conversationIdentity;
+const taskContinuation = globalThis.AgentOSTaskContinuation;
+if (!taskContinuation) {
+  throw new Error("AgentOS task continuation helpers were not loaded.");
+}
+const { buildContinuationPrompt } = taskContinuation;
 
 const TASK_STATE_KEY = "agentos.taskState";
 const TASKS_KEY = "agentos.tasks";
@@ -503,12 +508,7 @@ function validateAction(command) {
   return null;
 }
 function continuePrompt(state, result) {
-  return [
-    "Continue the SAME original task. AgentOS executed the previous action and is returning its actual result below.",
-    "Use this result as ground truth. Do not repeat a successful action. If more work is needed, emit exactly one next action envelope. If complete, answer normally in prose.",
-    "Original task:", state.task,
-    "Latest action result:", JSON.stringify(result, null, 2)
-  ].join("\n\n");
+  return buildContinuationPrompt(state, result);
 }
 async function executeAction(command, taskId = null) {
   if (await isStopped()) return { ok: false, error: "AgentOS is stopped." };
@@ -526,10 +526,25 @@ async function processAction(state, approved) {
     return { ok: false, error: "Supervised action blocked: explicit user approval is required." };
   }
   if (!approved) {
-    const rejected = { ok: false, rejected: true, action: state.action.action, reason: "User rejected this action." };
-    const prompt = continuePrompt(state, rejected);
-    await writeTaskState({ ...state, phase: "action_completed", prompt, action: null });
-    return sendPrompt({ ...state, phase: "action_completed" }, prompt);
+    const rejected = {
+      action: state.action.action,
+      arguments: state.action.arguments,
+      result: { ok: false, rejected: true, reason: "User rejected this action." }
+    };
+    const actionHistory = [
+      ...(Array.isArray(state.actionHistory) ? state.actionHistory : []),
+      rejected
+    ].slice(-MAX_STEPS);
+    const rejectedState = {
+      ...state,
+      actionHistory,
+      lastResult: rejected,
+      phase: "action_completed",
+      action: null
+    };
+    const prompt = continuePrompt(rejectedState, rejected);
+    await writeTaskState({ ...rejectedState, prompt });
+    return sendPrompt({ ...rejectedState, prompt }, prompt);
   }
   if (await isStopped()) return;
   await writeTaskState({ ...state, phase: "executing" });
@@ -538,9 +553,14 @@ async function processAction(state, approved) {
   catch (error) { result = { ok: false, error: String(error.message || error) }; }
   const steps = Number(state.steps || 0) + 1;
   const lastResult = { action: state.action.action, arguments: state.action.arguments, result };
-  const prompt = continuePrompt(state, lastResult);
+  const actionHistory = [
+    ...(Array.isArray(state.actionHistory) ? state.actionHistory : []),
+    lastResult
+  ].slice(-MAX_STEPS);
+  const continuedState = { ...state, steps, lastResult, actionHistory };
+  const prompt = continuePrompt(continuedState, lastResult);
   const completed = await writeTaskState({
-    ...state, phase: "action_completed", steps, lastResult,
+    ...continuedState, phase: "action_completed",
     prompt, action: null, response: null, approvalGranted: false
   });
   if (await isStopped()) {
@@ -749,7 +769,8 @@ async function startTask(message) {
   await setStopped(false);
   const id = "task-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
   const state = {
-    id, task: message.task, autonomy: message.autonomy === "autonomous" ? "autonomous" : "supervised",
+    id, task: message.task, initialPrompt: prompt, actionHistory: [],
+    autonomy: message.autonomy === "autonomous" ? "autonomous" : "supervised",
     tabId: tab.id, provider: info.provider, providerUrl: info.url,
     providerConversationId: info.conversationId || null,
     steps: 0, phase: "starting", startedAt: new Date().toISOString()
