@@ -1,8 +1,11 @@
 const api = globalThis.browser;
 const $ = (id) => document.getElementById(id);
 let activeTaskId = null;
-let terminalOutputBuffer = "";
-let lastRenderedResultKey = null;
+let terminals = new Map();
+let activeTerminalId = null;
+let latestTerminalId = null;
+let pendingTerminalId = null;
+let terminalCounter = 0;
 let agentStopped = false;
 
 const AGENTOS_INSTRUCTIONS = [
@@ -35,142 +38,165 @@ function formatTime(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-function appendTerminalText(text) {
-  if (!text) return;
-  terminalOutputBuffer = (terminalOutputBuffer + text).slice(-90000);
-  const output = $("terminalLiveOutput");
-  output.textContent = terminalOutputBuffer;
-  output.scrollTop = output.scrollHeight;
+function terminalResultText(result) {
+  const parts = [];
+  if (result?.stdout) parts.push(String(result.stdout));
+  if (result?.stderr) parts.push((parts.length ? "\n" : "") + "[stderr]\n" + String(result.stderr));
+  if (!parts.length) return result?.timed_out ? "Command timed out." : "Command finished with no output.";
+  return parts.join("");
 }
-function setTerminalRunning(running, label) {
-  $("terminalStatus").textContent = label || (running ? "PowerShell running" : "Waiting for command execution");
-  $("terminalStreamState").textContent = running ? "● LIVE STREAM" : "● STANDBY";
-  $("terminalStreamState").classList.toggle("running", Boolean(running));
-  document.querySelector(".terminal-indicator").classList.toggle("running", Boolean(running));
-}
-function renderTimeline(activity) {
-  const target = $("activityTimeline");
+function renderTerminalTabs() {
+  const target = $("terminalTabs");
   target.replaceChildren();
-  const entries = Array.isArray(activity) ? activity.slice(-60).reverse() : [];
-  $("activityCount").textContent = entries.length + (entries.length === 1 ? " event" : " events");
-  if (!entries.length) {
+  if (!terminals.size) {
     const empty = document.createElement("div");
-    empty.className = "timeline-empty";
-    empty.textContent = "Activity will appear here when a task starts.";
+    empty.className = "terminal-tabs-empty";
+    empty.textContent = "Terminal sessions will appear here.";
     target.append(empty);
     return;
   }
+  for (const record of terminals.values()) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "terminal-tab" + (record.id === activeTerminalId ? " active" : "") + (record.running ? " running" : "");
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(record.id === activeTerminalId));
+    button.textContent = record.label;
+    button.addEventListener("click", () => {
+      activeTerminalId = record.id;
+      renderTerminalTabs();
+      renderTerminalView();
+    });
+    target.append(button);
+  }
+}
+function renderTerminalView() {
+  const record = terminals.get(activeTerminalId);
+  if (!record) {
+    $("liveCommand").textContent = "No command running";
+    $("liveCommandMeta").textContent = "The command and its output will appear here in real time.";
+    $("terminalLiveOutput").textContent = "Waiting for the first terminal command…";
+    $("terminalStatus").textContent = "Waiting for command execution";
+    $("terminalStreamState").textContent = "● STANDBY";
+    $("terminalStreamState").classList.remove("running");
+    document.querySelector(".terminal-indicator")?.classList.remove("running");
+    return;
+  }
+  $("liveCommand").textContent = record.command || "Terminal command";
+  $("liveCommandMeta").textContent = record.meta || "Working directory unavailable";
+  $("terminalLiveOutput").textContent = record.output || (record.running ? "Command started. Waiting for output…" : "No output was produced.");
+  $("terminalLiveOutput").scrollTop = $("terminalLiveOutput").scrollHeight;
+  $("terminalStatus").textContent = record.status || (record.running ? "PowerShell command is running" : "Command finished");
+  $("terminalStreamState").textContent = record.running ? "● LIVE STREAM" : "● STANDBY";
+  $("terminalStreamState").classList.toggle("running", Boolean(record.running));
+  document.querySelector(".terminal-indicator")?.classList.toggle("running", Boolean(record.running));
+}
+function ensureTerminal(id, details = {}, select = true) {
+  let record = terminals.get(id);
+  if (!record) {
+    terminalCounter += 1;
+    record = { id, label: "Terminal " + terminalCounter, command: "", meta: "", output: "", running: false, status: "Session created", lastStream: null };
+    terminals.set(id, record);
+  }
+  if (details.command !== undefined) record.command = details.command || "Terminal command";
+  if (details.meta !== undefined) record.meta = details.meta;
+  if (details.output !== undefined) record.output = String(details.output || "").slice(-90000);
+  if (details.running !== undefined) record.running = Boolean(details.running);
+  if (details.status !== undefined) record.status = details.status;
+  if (select) activeTerminalId = id;
+  while (terminals.size > 12) {
+    const oldestId = terminals.keys().next().value;
+    if (oldestId === activeTerminalId || oldestId === latestTerminalId) break;
+    terminals.delete(oldestId);
+  }
+  renderTerminalTabs();
+  if (select || activeTerminalId === id) renderTerminalView();
+  return record;
+}
+function appendTerminalText(text, terminalId = activeTerminalId) {
+  const record = terminals.get(terminalId);
+  if (!record || !text) return;
+  record.output = (record.output + text).slice(-90000);
+  if (terminalId === activeTerminalId) renderTerminalView();
+}
+function setTerminalRunning(running, label) {
+  const record = terminals.get(activeTerminalId);
+  if (record) {
+    record.running = Boolean(running);
+    if (label) record.status = label;
+  }
+  renderTerminalView();
+}
+function restoreTerminalTabs(state) {
+  const entries = Array.isArray(state.activity) ? state.activity : [];
   for (const entry of entries) {
-    const item = document.createElement("div");
-    item.className = "timeline-item";
-    const rail = document.createElement("div");
-    rail.className = "timeline-rail";
-    const dot = document.createElement("span");
-    dot.className = "timeline-dot" + (entry.phase === "completed" || entry.ok === true ? " good" : ["error", "interrupted"].includes(entry.phase) || entry.ok === false ? " bad" : ["awaiting_approval", "paused"].includes(entry.phase) ? " warn" : "");
-    rail.append(dot);
-    const content = document.createElement("div");
-    content.className = "timeline-content";
-    const topline = document.createElement("div");
-    topline.className = "timeline-topline";
-    const title = document.createElement("span");
-    title.className = "timeline-title";
-    title.textContent = entry.title || entry.phase || "Activity";
-    const time = document.createElement("time");
-    time.className = "timeline-time";
-    time.textContent = formatTime(entry.at);
-    topline.append(title, time);
-    content.append(topline);
-    if (entry.action) {
-      const detail = document.createElement("div");
-      detail.className = "timeline-detail";
-      detail.textContent = entry.action + (entry.ok === true ? " · succeeded" : entry.ok === false ? " · failed" : "");
-      content.append(detail);
+    if (entry.action !== "terminal.execute" || entry.phase !== "action_completed") continue;
+    const id = entry.id || (state.id + ":history:" + terminalCounter);
+    const record = ensureTerminal(id, {
+      command: entry.command || "Terminal command",
+      meta: (entry.cwd || "Selected workspace") + (entry.elapsed_ms != null ? " · " + entry.elapsed_ms + " ms" : ""),
+      output: terminalResultText({ stdout: entry.stdout, stderr: entry.stderr, timed_out: entry.timed_out }),
+      running: false,
+      status: entry.timed_out ? "Command timed out" : entry.ok ? "Command completed successfully" : "Command failed"
+    }, false);
+    latestTerminalId = record.id;
+  }
+
+  const action = state.action;
+  if (action?.action === "terminal.execute" && ["executing", "awaiting_approval"].includes(state.phase)) {
+    const id = "pending:" + state.id + ":" + (Number(state.steps || 0) + 1);
+    pendingTerminalId = id;
+    ensureTerminal(id, {
+      command: action.arguments?.command || "Terminal command",
+      meta: (action.arguments?.cwd || "Selected workspace") + " · timeout: " + (action.arguments?.timeout_seconds || 120) + "s",
+      running: state.phase === "executing",
+      status: state.phase === "executing" ? "Starting PowerShell command" : "Waiting for approval"
+    }, true);
+    latestTerminalId = id;
+    return;
+  }
+
+  if (state.lastResult?.action === "terminal.execute") {
+    let record = latestTerminalId ? terminals.get(latestTerminalId) : null;
+    if (!record) {
+      record = [...terminals.values()].slice(-1)[0] || ensureTerminal(state.id + ":result:" + state.steps, {}, false);
+      latestTerminalId = record.id;
     }
-    if (entry.command) {
-      const command = document.createElement("pre");
-      command.className = "timeline-command";
-      command.textContent = entry.command;
-      content.append(command);
+    const result = state.lastResult.result || {};
+    record.command = state.lastResult.arguments?.command || record.command || "Last terminal command";
+    record.meta = (result.cwd || state.lastResult.arguments?.cwd || "Selected workspace") +
+      " · " + (result.elapsed_ms ?? "—") + " ms · exit " + (result.returncode ?? "—");
+    if (!record.output) record.output = terminalResultText(result);
+    record.running = false;
+    record.status = result.timed_out ? "Command timed out" : result.ok ? "Command completed successfully" : "Command failed";
+    renderTerminalTabs();
+    if (record.id === activeTerminalId || !activeTerminalId) {
+      activeTerminalId = record.id;
+      renderTerminalView();
     }
-    if (entry.cwd) {
-      const cwd = document.createElement("div");
-      cwd.className = "timeline-detail";
-      cwd.textContent = "Working directory: " + entry.cwd;
-      content.append(cwd);
-    }
-    if (entry.message || entry.error) {
-      const message = document.createElement("div");
-      message.className = "timeline-detail";
-      message.textContent = entry.message || entry.error;
-      content.append(message);
-    }
-    if (entry.returncode !== undefined && entry.returncode !== null) {
-      const result = document.createElement("div");
-      result.className = "timeline-detail";
-      result.textContent = "Exit code: " + entry.returncode + (entry.elapsed_ms ? " · " + entry.elapsed_ms + " ms" : "");
-      content.append(result);
-    }
-    if (entry.stdout || entry.stderr) {
-      const output = document.createElement("pre");
-      output.className = "timeline-command";
-      output.textContent = (entry.stdout ? "[stdout]\n" + entry.stdout : "") +
-        (entry.stderr ? (entry.stdout ? "\n" : "") + "[stderr]\n" + entry.stderr : "");
-      content.append(output);
-    }
-    if (entry.timed_out) {
-      const timeout = document.createElement("div");
-      timeout.className = "timeline-detail";
-      timeout.textContent = "Command timed out.";
-      content.append(timeout);
-    }
-    item.append(rail, content);
-    target.append(item);
+  } else if (!activeTerminalId && terminals.size) {
+    activeTerminalId = [...terminals.keys()].slice(-1)[0];
+    renderTerminalTabs();
+    renderTerminalView();
   }
 }
 function renderActivity(state) {
   if (!state) return;
   const phase = state.phase || "idle";
-  const phaseLabel = agentStopped && phase === "executing" ? "finishing current action" : phase.replace(/_/g, " ");
-  const badge = $("activityBadge");
-  badge.textContent = phaseLabel.toUpperCase();
-  badge.className = "badge " + (["completed", "cancelled"].includes(phase) ? "good" : ["error", "interrupted"].includes(phase) ? "bad" : ["executing", "awaiting_model", "submitting_prompt"].includes(phase) ? "warn" : "neutral");
-  $("activityTask").textContent = state.task || "No active task";
-  $("activityStepCount").textContent = Number(state.steps || 0) + (Number(state.steps || 0) === 1 ? " action" : " actions");
-  $("activityPhase").textContent = phaseLabel;
-  const progress = {
-    starting: 8, submitting_prompt: 18, awaiting_model: 30, response_ready: 42,
-    awaiting_approval: 50, executing: 68, action_completed: 78,
-    completed: 100, cancelled: 100, error: 100, interrupted: 100, paused: 50, step_limit: 100
+  const labels = {
+    starting: "STARTING", submitting_prompt: "SENDING PROMPT", awaiting_model: "WAITING FOR AI",
+    response_ready: "PROCESSING RESPONSE", awaiting_approval: "APPROVAL REQUIRED",
+    executing: "RUNNING ACTION", action_completed: "ACTION FINISHED", completed: "COMPLETED",
+    cancelled: "CANCELLED", paused: "PAUSED", interrupted: "INTERRUPTED", error: "ERROR",
+    step_limit: "STEP LIMIT"
   };
-  $("activityProgress").style.width = (progress[phase] ?? 5) + "%";
-  renderTimeline(state.activity || []);
-
-  const currentAction = state.action;
-  if (currentAction?.action === "terminal.execute" && ["executing", "awaiting_approval"].includes(phase)) {
-    const args = currentAction.arguments || {};
-    $("liveCommand").textContent = args.command || "Terminal command";
-    $("liveCommandMeta").textContent = (args.cwd ? "cwd: " + args.cwd : "cwd: selected workspace") + " · timeout: " + (args.timeout_seconds || 120) + "s";
-    if (phase === "executing") setTerminalRunning(true, agentStopped ? "Stop requested · current command is finishing" : "PowerShell command is running");
-    else setTerminalRunning(false, "Waiting for approval before execution");
-  } else if (state.lastResult?.action === "terminal.execute") {
-    $("liveCommand").textContent = state.lastResult.arguments?.command || "Last terminal command";
-    const result = state.lastResult.result || {};
-    $("liveCommandMeta").textContent = (result.cwd || "Selected workspace") + " · " + (result.elapsed_ms ?? "—") + " ms";
-    const resultKey = state.id + ":" + state.steps;
-    if (lastRenderedResultKey !== resultKey) {
-      if (!terminalOutputBuffer) {
-        terminalOutputBuffer = "";
-        if (result.stdout) terminalOutputBuffer += "[stdout]\n" + result.stdout;
-        if (result.stderr) terminalOutputBuffer += (terminalOutputBuffer ? "\n" : "") + "[stderr]\n" + result.stderr;
-        if (!terminalOutputBuffer) terminalOutputBuffer = result.timed_out ? "Command timed out." : "Command finished with no output.";
-        $("terminalLiveOutput").textContent = terminalOutputBuffer.slice(-90000);
-      }
-      lastRenderedResultKey = resultKey;
-    }
-    setTerminalRunning(false, result.timed_out ? "Command timed out" : result.ok ? "Command completed successfully" : "Command failed");
-  } else if (!currentAction && !state.lastResult?.action) {
-    setTerminalRunning(false, "Waiting for command execution");
-  }
+  const badge = $("activityBadge");
+  badge.textContent = agentStopped && phase === "executing" ? "FINISHING CURRENT ACTION" : (labels[phase] || "WORKING");
+  badge.className = "badge " + (["completed", "cancelled"].includes(phase) ? "good" :
+    ["error", "interrupted"].includes(phase) ? "bad" :
+    ["executing", "awaiting_model", "submitting_prompt"].includes(phase) ? "warn" : "neutral");
+  $("activityTask").textContent = state.task || "No active task";
+  restoreTerminalTabs(state);
 }
 function renderTaskState(state) {
   if (!state) {
@@ -181,20 +207,24 @@ function renderTaskState(state) {
     $("activityBadge").textContent = "IDLE";
     $("activityBadge").className = "badge neutral";
     $("activityTask").textContent = "No active task";
-    $("activityStepCount").textContent = "0 actions";
-    $("activityPhase").textContent = "Waiting for a task";
-    $("activityProgress").style.width = "0%";
-    renderTimeline([]);
+    terminals = new Map();
+    activeTerminalId = null;
+    latestTerminalId = null;
+    pendingTerminalId = null;
+    terminalCounter = 0;
+    renderTerminalTabs();
+    renderTerminalView();
     return;
   }
   if (state.id && state.id !== activeTaskId) {
     activeTaskId = state.id;
-    terminalOutputBuffer = "";
-    lastRenderedResultKey = null;
-    $("terminalLiveOutput").textContent = "Live stdout / stderr stream\n────────────────────────────\nWaiting for terminal.execute…";
-    $("liveCommand").textContent = "No command running";
-    $("liveCommandMeta").textContent = "Commands and output will appear here as they run.";
-    setTerminalRunning(false);
+    terminals = new Map();
+    activeTerminalId = null;
+    latestTerminalId = null;
+    pendingTerminalId = null;
+    terminalCounter = 0;
+    renderTerminalTabs();
+    renderTerminalView();
   }
   logState(state.phase);
   $("resumeTaskBtn").hidden = ![
@@ -381,11 +411,13 @@ async function clearTaskHistory() {
   try {
     const result = await api.runtime.sendMessage({ type: "AGENTOS_TASK_HISTORY_CLEAR" });
     if (!result?.ok) throw new Error(result?.error || "Could not clear task history.");
-    terminalOutputBuffer = "";
-    lastRenderedResultKey = null;
-    $("terminalLiveOutput").textContent = "History cleared. Waiting for the next task.";
-    $("liveCommand").textContent = "No command running";
-    $("liveCommandMeta").textContent = "Commands and output will appear here as they run.";
+    terminals = new Map();
+    activeTerminalId = null;
+    latestTerminalId = null;
+    pendingTerminalId = null;
+    terminalCounter = 0;
+    renderTerminalTabs();
+    renderTerminalView();
     renderTaskState(null);
     out({ ok: true, message: "Current task history cleared. Workspace files were not changed." });
   } catch (error) {
@@ -476,18 +508,52 @@ api.runtime.onMessage.addListener(message => {
   if (message?.type === "AGENTOS_TERMINAL_EVENT" && (!message.taskId || message.taskId === activeTaskId)) {
     const event = message.event || {};
     if (event.type === "terminal.started") {
-      terminalOutputBuffer = "";
-      $("terminalLiveOutput").textContent = "";
-      $("liveCommand").textContent = event.command || "Terminal command";
-      $("liveCommandMeta").textContent = (event.cwd || "Selected workspace") + " · timeout: " + event.timeout_seconds + "s · started " + formatTime(event.started_at * 1000);
-      setTerminalRunning(true, "PowerShell command is running");
+      const id = event.terminalId || (activeTaskId + ":terminal:" + (event.started_at || Date.now()));
+      let record = pendingTerminalId ? terminals.get(pendingTerminalId) : null;
+      if (record) {
+        terminals.delete(pendingTerminalId);
+        record.id = id;
+        terminals.set(id, record);
+      } else {
+        record = ensureTerminal(id, {}, false);
+      }
+      pendingTerminalId = null;
+      latestTerminalId = id;
+      activeTerminalId = id;
+      record.command = event.command || "Terminal command";
+      record.meta = (event.cwd || "Selected workspace") + " · timeout: " + event.timeout_seconds +
+        "s · started " + formatTime((event.started_at || Date.now() / 1000) * 1000);
+      record.output = "";
+      record.lastStream = null;
+      record.running = true;
+      record.status = "PowerShell command is running";
+      renderTerminalTabs();
+      renderTerminalView();
     } else if (event.type === "terminal.output") {
-      if (!terminalOutputBuffer) terminalOutputBuffer = "";
-      appendTerminalText((event.stream === "stderr" ? "[stderr] " : "") + (event.text || ""));
-      setTerminalRunning(true, "Receiving " + (event.stream || "terminal") + " output");
+      const id = event.terminalId || latestTerminalId || activeTerminalId;
+      const record = terminals.get(id);
+      if (record) {
+        if (record.lastStream !== event.stream) {
+          if (event.stream === "stderr") record.output += (record.output ? "\n" : "") + "[stderr]\n";
+          else if (record.lastStream === "stderr") record.output += "\n[stdout]\n";
+          record.lastStream = event.stream;
+        }
+        record.output = (record.output + (event.text || "")).slice(-90000);
+        record.running = true;
+        record.status = "Receiving " + (event.stream || "terminal") + " output";
+        if (id === activeTerminalId) renderTerminalView();
+        renderTerminalTabs();
+      }
     } else if (event.type === "terminal.finished") {
-      setTerminalRunning(false, event.timed_out ? "Command timed out" : event.ok ? "Command completed successfully" : "Command failed");
-      $("liveCommandMeta").textContent = "Exit code: " + event.returncode + " · " + event.elapsed_ms + " ms";
+      const id = event.terminalId || latestTerminalId || activeTerminalId;
+      const record = terminals.get(id);
+      if (record) {
+        record.running = false;
+        record.status = event.timed_out ? "Command timed out" : event.ok ? "Command completed successfully" : "Command failed";
+        record.meta = "Exit code: " + event.returncode + " · " + event.elapsed_ms + " ms";
+        renderTerminalTabs();
+        if (id === activeTerminalId) renderTerminalView();
+      }
     }
   }
 });
