@@ -18,6 +18,8 @@ const {
   requiresAgentAction,
   requiresUnfinishedStagedTask,
   nextNonActionRetryCount,
+  isRecoverableNonActionProtocolError,
+  recoverNonActionProtocolState,
   beginStageAttempt,
   recordStageResult,
   isStageAlreadyPassed,
@@ -300,12 +302,8 @@ async function readProviderMessages(tabId) {
     conversationId: result.conversationId || null
   };
 }
-function responseDelta(messages, baseline, messageIds = [], baselineMessageIds = []) {
-  if (!Array.isArray(messages) || !Array.isArray(baseline)) return "";
-
-  // Prefer stable message identity when the provider exposes it. This catches a
-  // new turn even when the conversation's visible message count stays constant
-  // (for example, when the UI virtualizes older turns).
+function responseDeltaDetails(messages, baseline, messageIds = [], baselineMessageIds = []) {
+  if (!Array.isArray(messages) || !Array.isArray(baseline)) return { response: "", messageIds: [] };
   const identitiesAreAligned =
     Array.isArray(messageIds) &&
     Array.isArray(baselineMessageIds) &&
@@ -319,20 +317,24 @@ function responseDelta(messages, baseline, messageIds = [], baselineMessageIds =
       .map((id, index) => previousIds.has(id) ? -1 : index)
       .filter(index => index >= 0);
     if (newIndexes.length) {
-      return newIndexes
-        .map(index => String(messages[index] || "").trim())
-        .filter(Boolean)
-        .join("\n\n")
-        .trim();
+      return {
+        response: newIndexes.map(index => String(messages[index] || "").trim())
+          .filter(Boolean).join("\n\n").trim(),
+        messageIds: newIndexes.map(index => messageIds[index])
+      };
     }
   }
-
-  // Backward-compatible text delta for providers and saved tasks without IDs.
-  if (messages.length > baseline.length) return messages.slice(baseline.length).join("\n\n").trim();
-  if (messages.length && messages[messages.length - 1] !== baseline[baseline.length - 1]) {
-    return String(messages[messages.length - 1]).trim();
+  if (messages.length > baseline.length) {
+    return { response: messages.slice(baseline.length).join("\n\n").trim(), messageIds: [] };
   }
-  return "";
+  if (messages.length && messages[messages.length - 1] !== baseline[baseline.length - 1]) {
+    return { response: String(messages[messages.length - 1]).trim(), messageIds: [] };
+  }
+  return { response: "", messageIds: [] };
+}
+
+function responseDelta(messages, baseline, messageIds = [], baselineMessageIds = []) {
+  return responseDeltaDetails(messages, baseline, messageIds, baselineMessageIds).response;
 }
 async function sendPrompt(state, prompt) {
   if (await isStopped()) return;
@@ -579,7 +581,7 @@ async function processAction(state, approved) {
   const stageLedger = recordStageResult(executingState, lastResult);
   const continuedState = {
     ...state, steps, lastResult, actionHistory, nonActionRetries: 0,
-    duplicateStageRetries: 0,
+    duplicateStageRetries: 0, protocolRecovery: null,
     ...(state.action?.action === "terminal.execute" ? { stageLedger } : {})
   };
   const prompt = continuePrompt(continuedState, lastResult);
@@ -597,7 +599,7 @@ async function processAction(state, approved) {
   }
   if (!(await isStopped())) await sendPrompt(completed, prompt);
 }
-async function processModelResponse(state, response) {
+async function processModelResponse(state, response, responseContext = {}) {
   const ready = await writeTaskState({ ...state, phase: "response_ready", response });
   const action = globalThis.AgentOSActionParser?.extractAction(response) || null;
   if (!action) {
@@ -620,6 +622,13 @@ async function processModelResponse(state, response) {
       }
       await writeTaskState({
         ...ready, phase: "error", finalResponse: null,
+        protocolRecovery: {
+          kind: "non-action-response",
+          response,
+          messageIds: Array.isArray(responseContext.messageIds) ? responseContext.messageIds : [],
+          conversationId: responseContext.conversationId || ready.providerConversationId || null,
+          recordedAt: new Date().toISOString()
+        },
         error: stagedWorkRemains
           ? "The AI website returned ordinary text instead of the next required AgentOS action. The staged task is still incomplete; no completion was recorded. Resume after inspecting the conversation."
           : "The AI website returned ordinary text instead of a valid AgentOS action after the bounded protocol-recovery attempts. No action was executed. Inspect the AI response before retrying."
@@ -762,7 +771,8 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
   if (["starting", "submitting_prompt"].includes(state.phase)) {
     return { ok: true, accepted: false, reason: "task-transitioning" };
   }
-  if (state.phase !== "awaiting_model" || await isStopped()) {
+  const recoverableProtocolError = isRecoverableNonActionProtocolError(state);
+  if ((state.phase !== "awaiting_model" && !recoverableProtocolError) || await isStopped()) {
     return { ok: true, accepted: true, reason: "task-not-awaiting-model" };
   }
   // ChatGPT's root fallback can include the entire page (including the
@@ -771,14 +781,20 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
   if (state.provider === "chatgpt" && strategy !== "semantic selectors") {
     return { ok: true, accepted: true, reason: "unsafe-chatgpt-snapshot-strategy" };
   }
-  const response = responseDelta(
-    messages,
-    state.baseline || [],
-    messageIds,
-    state.baselineMessageIds || []
+  const delta = responseDeltaDetails(
+    messages, state.baseline || [], messageIds, state.baselineMessageIds || []
   );
-  if (!response) {
+  if (!delta.response) {
     return { ok: true, accepted: true, reason: "no-new-response" };
+  }
+  if (recoverableProtocolError) {
+    const recovered = recoverNonActionProtocolState(state, delta.response, delta.messageIds);
+    if (!recovered) {
+      return { ok: true, accepted: true, reason: "protocol-error-response-already-seen" };
+    }
+    // Persist only this safe transition. Keep the task identity, completed
+    // action history, stage/handoff ledgers, and retry budget unchanged.
+    state = await writeTaskState(recovered);
   }
   if (responseProcessingTaskId === state.id) {
     return { ok: true, accepted: true, reason: "response-already-processing" };
@@ -786,7 +802,11 @@ async function handleAssistantSnapshot(tabId, messages, rawUrl, strategy, contin
   responseProcessingTaskId = state.id;
   try {
     await api.alarms.clear("agentos-response-timeout");
-    await processModelResponse(state, response);
+    await processModelResponse(state, delta.response, {
+      messageIds: delta.messageIds,
+      conversationId,
+      url: rawUrl
+    });
     return { ok: true, accepted: true, reason: "response-processed" };
   } finally {
     if (responseProcessingTaskId === state.id) responseProcessingTaskId = null;
@@ -846,7 +866,7 @@ async function checkAwaitingModelResponse() {
       };
     }
 
-    if (!state || state.phase !== "awaiting_model") {
+    if (!state || (state.phase !== "awaiting_model" && !isRecoverableNonActionProtocolError(state))) {
       return { ok: true, checked: false, reason: "task-not-awaiting-model", state: state || null };
     }
     if (await isStopped()) {
