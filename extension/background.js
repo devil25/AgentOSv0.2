@@ -1,4 +1,15 @@
 const api = globalThis.browser;
+const conversationIdentity = globalThis.AgentOSConversationIdentity;
+if (!conversationIdentity) {
+  throw new Error("AgentOS conversation identity helpers were not loaded.");
+}
+const {
+  chatGPTConversationIdentityMatches,
+  sameConversation,
+  isChatGPTContinuationUrl,
+  applyChatGPTHandoff
+} = conversationIdentity;
+
 const TASK_STATE_KEY = "agentos.taskState";
 const TASKS_KEY = "agentos.tasks";
 const ACTIVE_TASK_KEY = "agentos.activeTaskId";
@@ -112,53 +123,6 @@ async function setActiveTask(taskId) {
   const stored = await api.storage.local.get(TASKS_KEY);
   const state = stored[TASKS_KEY]?.[taskId];
   if (state) await api.storage.local.set({ [TASK_STATE_KEY]: state, [ACTIVE_TASK_KEY]: taskId });
-}
-function chatGPTConversationIdentityMatches(state, conversationId) {
-  if (state?.provider !== "chatgpt" || typeof conversationId !== "string" || !conversationId) return false;
-
-  // The visible DOM identity is authoritative. ChatGPT's local-chatgpt URL
-  // token is a separate identifier and must not override a known DOM identity.
-  if (state.providerConversationId) {
-    return state.providerConversationId === conversationId;
-  }
-
-  // Backward compatibility for saved tasks that predate DOM identity storage.
-  try {
-    const parsed = new URL(state.providerUrl);
-    const match = decodeURIComponent(parsed.pathname).match(/^\/c\/(local-chatgpt:.+)$/i);
-    return Boolean(match && match[1] === conversationId);
-  } catch (_) { return false; }
-}
-
-function sameConversation(a, provider, url, conversationId = null) {
-  if (a?.provider !== provider) return false;
-
-  // When both sides expose ChatGPT's DOM identity, do not accept a URL-only
-  // match if those identities disagree.
-  if (provider === "chatgpt" && a.providerConversationId) {
-    return a.providerConversationId === conversationId;
-  }
-
-  if (a.providerUrl && url) {
-    try {
-      const oldUrl = new URL(a.providerUrl), newUrl = new URL(url);
-      if (oldUrl.origin === newUrl.origin && oldUrl.pathname === newUrl.pathname) return true;
-    } catch (_) {
-      if (a.providerUrl === url) return true;
-    }
-  } else if (a.providerUrl === url) {
-    return true;
-  }
-  return provider === "chatgpt" && chatGPTConversationIdentityMatches(a, conversationId);
-}
-function isChatGPTContinuationUrl(provider, url) {
-  if (provider !== "chatgpt" || !url) return false;
-  try {
-    const parsed = new URL(url);
-    const path = decodeURIComponent(parsed.pathname);
-    return ["chatgpt.com", "chat.openai.com"].includes(parsed.hostname) &&
-      /^\/c\/local-chatgpt:/i.test(path);
-  } catch (_) { return false; }
 }
 async function taskStateForActiveTab() {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
@@ -366,20 +330,9 @@ async function sendPrompt(state, prompt) {
       stage = "checking ChatGPT context window";
       const handoff = await tabRequest(state.tabId, "AGENTOS_PROVIDER_HANDOFF");
       if (handoff?.handedOff && handoff.url) {
-        state = await writeTaskState({
-          ...state,
-          tabId: state.tabId,
-          providerUrl: handoff.url,
-          providerConversationId: null,
-          conversationTransfer: {
-            ...(state.conversationTransfer || {}),
-            from: state.providerUrl,
-            to: handoff.url,
-            observedUrl: handoff.url,
-            at: new Date().toISOString(),
-            method: "chatgpt-context-window-new-chat"
-          }
-        });
+        state = await writeTaskState(
+          applyChatGPTHandoff(state, handoff)
+        );
       } else if (handoff?.ok === false) {
         throw new Error(handoff.error || "ChatGPT conversation handoff failed.");
       }
@@ -387,6 +340,16 @@ async function sendPrompt(state, prompt) {
 
     stage = "reading the active conversation";
     const snapshot = await readProviderMessages(state.tabId);
+    const expectedConversationId = state.provider === "chatgpt"
+      ? state.providerConversationId
+      : null;
+    if (expectedConversationId && snapshot.conversationId &&
+        expectedConversationId !== snapshot.conversationId) {
+      throw new Error(
+        "The active ChatGPT conversation identity changed after handoff. " +
+        "The prompt was not sent."
+      );
+    }
     const submittingState = await writeTaskState({
       ...state,
       phase: "submitting_prompt",
@@ -394,8 +357,8 @@ async function sendPrompt(state, prompt) {
       baseline: snapshot.messages,
       baselineMessageIds: snapshot.messageIds || [],
       providerUrl: snapshot.url || state.providerUrl,
-      // Never carry the previous conversation's identity across a handoff.
-      providerConversationId: snapshot.conversationId || null,
+      // A verified handoff ID is retained when the DOM temporarily omits it.
+      providerConversationId: snapshot.conversationId || state.providerConversationId || null,
       response: null,
       action: null,
       error: null,
@@ -419,14 +382,26 @@ async function sendPrompt(state, prompt) {
     // update their SPA URL/DOM identity a moment after accepting the prompt.
     let providerUrl = submitting.providerUrl;
     let providerConversationId = submitting.providerConversationId;
+    let conversationIdentityConflict = false;
     try {
       stage = "verifying the conversation";
       const info = await tabRequest(submitting.tabId, "AGENTOS_PROVIDER_INSPECT");
       if (info?.ok && info.provider === submitting.provider) {
-        providerUrl = info.url || providerUrl;
-        providerConversationId = info.conversationId || providerConversationId;
+        conversationIdentityConflict = submitting.provider === "chatgpt" &&
+          Boolean(submitting.providerConversationId && info.conversationId) &&
+          submitting.providerConversationId !== info.conversationId;
+        if (!conversationIdentityConflict) {
+          providerUrl = info.url || providerUrl;
+          providerConversationId = info.conversationId || providerConversationId;
+        }
       }
     } catch (_) {}
+    if (conversationIdentityConflict) {
+      throw new Error(
+        "ChatGPT reported a different conversation identity after submission. " +
+        "The prompt may already have been sent; inspect that conversation before resuming."
+      );
+    }
 
     if (await isStopped()) {
       await writeTaskState({
