@@ -30,23 +30,23 @@
   }
   function buildTaskRunContext(prompt, taskId) {
     const source = String(prompt || "");
-    const testId = source.match(/\\bTest ID\\s*:\\s*([A-Za-z0-9][A-Za-z0-9._-]*)/i)?.[1] || null;
-    const stageMatch = source.match(/\\b(\\d{1,3})\\s+stages?\\b|\\b(?:stage|step)\\s*0*1\\s*\\/\\s*(\\d{1,3})/i);
+    const testId = source.match(/\bTest ID\s*:\s*([A-Za-z0-9][A-Za-z0-9._-]*)/i)?.[1] || null;
+    const stageMatch = source.match(/\b(\d{1,3})\s+stages?\b|\b(?:stage|step)\s*0*1\s*\/\s*(\d{1,3})/i);
     const stageCount = Number(stageMatch?.[1] || stageMatch?.[2] || 0);
-    const folderMatch = source.match(/(?:create an isolated folder|أنشئ مجلداً مستقلاً|أنشئ مجلدًا مستقلاً)\\s*[:：]\\s*([^\\r\\n]+)/i);
+    const folderMatch = source.match(/(?:create an isolated folder|أنشئ مجلداً مستقلاً|أنشئ مجلدًا مستقلاً)\s*[:：]\s*([^\r\n]+)/i);
     if (!testId || stageCount < 2 || !folderMatch) return null;
 
-    const requestedFolder = folderMatch[1].trim().replace(/^[-*]\\s*/, "").replace(/^["']|["']$/g, "");
+    const requestedFolder = folderMatch[1].trim().replace(/^[-*]\s*/, "").replace(/^["']|["']$/g, "");
     if (!requestedFolder || /^[A-Za-z]:/.test(requestedFolder) ||
-        /^[\\\\/]/.test(requestedFolder) ||
-        requestedFolder.split(/[\\\\/]/).some(part => part === "." || part === "..")) return null;
+        /^[\\/]/.test(requestedFolder) ||
+        requestedFolder.split(/[\\/]/).some(part => part === "." || part === "..")) return null;
 
     const safeTaskId = String(taskId || "").trim();
     if (!/^task-[A-Za-z0-9-]+$/.test(safeTaskId)) return null;
     return {
       testId,
       stageCount,
-      runEvidenceDirectory: requestedFolder.replace(/\\\\/g, "/").replace(/\\/+$/, "") + "/runs/" + safeTaskId
+      runEvidenceDirectory: requestedFolder.replace(/\\/g, "/").replace(/\/+$/, "") + "/runs/" + safeTaskId
     };
   }
 
@@ -60,7 +60,7 @@
       "Keep the pre-existing test-root files and every other run directory read-only. Do not overwrite, edit, rename, or delete any root-level manifest, stages, reports, evidence, or files belonging to another run.",
       "Create this run's manifest.json, stages/, reports/, and evidence/ only inside the run-specific directory above. If older root-level artifacts exist, preserve them as historical evidence and do not treat them as this run's outputs.",
       "Use the same run-specific directory after every automatic context handoff. Never derive or change it from a conversation ID."
-    ].join("\\n\\n");
+    ].join("\n\n");
   }
 
   function buildContinuationPrompt(state, latestResult = null) {
