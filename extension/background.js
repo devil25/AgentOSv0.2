@@ -26,11 +26,81 @@ async function readTaskState(taskId) {
   if (!taskId && stored[ACTIVE_TASK_KEY] && tasks[stored[ACTIVE_TASK_KEY]]) return tasks[stored[ACTIVE_TASK_KEY]];
   return stored[TASK_STATE_KEY] || null;
 }
+function redactActivityText(value) {
+  return String(value || "")
+    .replace(/(authorization\\s*[:=]\\s*["']?Bearer\\s+)[A-Za-z0-9._~+\\/-]+/gi, "$1[REDACTED]")
+    .replace(/(bearer\\s+)[A-Za-z0-9._~+\\/-]{12,}/gi, "$1[REDACTED]")
+    .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret)(\\s*[:=]\\s*["']?)[^\\s,"']+/gi, "$1$2[REDACTED]")
+    .slice(0, 5000);
+}
+
+function activityForState(state, previous) {
+  const activity = Array.isArray(state.activity)
+    ? state.activity.slice()
+    : Array.isArray(previous?.activity) ? previous.activity.slice() : [];
+  if (!state.phase || state.phase === previous?.phase) return activity;
+
+  const labels = {
+    starting: "Task started",
+    submitting_prompt: "Sending prompt to AI website",
+    awaiting_model: "Waiting for AI response",
+    response_ready: "AI response received",
+    awaiting_approval: "Action waiting for approval",
+    executing: "Executing action",
+    action_completed: "Action finished",
+    completed: "Task completed",
+    paused: "Task paused",
+    interrupted: "Task interrupted",
+    error: "Task failed",
+    step_limit: "Step limit reached"
+  };
+  const entry = {
+    id: (state.id || "task") + ":" + Date.now() + ":" + state.phase,
+    at: new Date().toISOString(),
+    phase: state.phase,
+    title: labels[state.phase] || state.phase.replace(/_/g, " ")
+  };
+
+  if (state.action && ["awaiting_approval", "executing"].includes(state.phase)) {
+    entry.action = state.action.action;
+    const args = state.action.arguments || {};
+    entry.command = typeof args.command === "string"
+      ? redactActivityText(args.command)
+      : redactActivityText(JSON.stringify(args));
+    entry.cwd = typeof args.cwd === "string" ? redactActivityText(args.cwd) : "";
+  }
+  if (state.phase === "action_completed" && state.lastResult) {
+    const result = state.lastResult.result || {};
+    entry.action = state.lastResult.action;
+    entry.ok = result.ok === true;
+    entry.returncode = result.returncode ?? null;
+    entry.timed_out = result.timed_out === true;
+    entry.elapsed_ms = result.elapsed_ms ?? null;
+    entry.stdout = redactActivityText(result.stdout || "");
+    entry.stderr = redactActivityText(result.stderr || "");
+    entry.error = redactActivityText(result.error || "");
+  }
+  if (["paused", "interrupted", "error", "step_limit"].includes(state.phase)) {
+    entry.message = redactActivityText(state.error || "");
+  }
+  if (state.phase === "completed") {
+    entry.message = redactActivityText(state.finalResponse || "").slice(0, 1200);
+  }
+  activity.push(entry);
+  return activity.slice(-60);
+}
+
 async function writeTaskState(state) {
   const stored = await api.storage.local.get([TASKS_KEY, ACTIVE_TASK_KEY]);
   const tasks = stored[TASKS_KEY] && typeof stored[TASKS_KEY] === "object" ? stored[TASKS_KEY] : {};
   const id = state.id || stored[ACTIVE_TASK_KEY] || ("task-" + Date.now());
-  const next = { ...state, id, updatedAt: new Date().toISOString() };
+  const previous = tasks[id] || null;
+  const next = {
+    ...state,
+    id,
+    activity: activityForState(state, previous),
+    updatedAt: new Date().toISOString()
+  };
   tasks[id] = next;
   await api.storage.local.set({ [TASK_STATE_KEY]: next, [TASKS_KEY]: tasks, [ACTIVE_TASK_KEY]: id });
   try { await api.runtime.sendMessage({ type: "AGENTOS_TASK_STATE_UPDATED", taskId: id, state: next }); } catch (_) {}
@@ -156,7 +226,19 @@ async function nativeRequest(payload) {
         ? (Math.min(Math.max(requestedTerminalTimeout, 1), 600) + 15000) * 1000
         : 15000;
     timer = setTimeout(() => finish({ ok: false, error: "Native host timeout" }), timeoutMs);
-    port.onMessage.addListener(finish);
+    port.onMessage.addListener((message) => {
+      if (message?.agentos_event === true) {
+        try {
+          api.runtime.sendMessage({
+            type: "AGENTOS_TERMINAL_EVENT",
+            taskId: payload?.task_id || null,
+            event: message
+          });
+        } catch (_) {}
+        return;
+      }
+      finish(message);
+    });
     port.onDisconnect.addListener(() => finish({
       ok: false, error: api.runtime.lastError?.message || "Native host disconnected"
     }));
@@ -326,14 +408,14 @@ function continuePrompt(state, result) {
     "Latest action result:", JSON.stringify(result, null, 2)
   ].join("\n\n");
 }
-async function executeAction(command) {
+async function executeAction(command, taskId = null) {
   if (await isStopped()) return { ok: false, error: "AgentOS is stopped." };
   if (command.action === "browser.open_url") {
     const url = new URL(command.arguments.url);
     const tab = await api.tabs.create({ url: url.href, active: true });
     return { ok: true, tabId: tab.id, url: url.href };
   }
-  return nativeRequest({ type: "action.execute", action: command.action, arguments: command.arguments });
+  return nativeRequest({ type: "action.execute", action: command.action, arguments: command.arguments, task_id: taskId });
 }
 async function processAction(state, approved) {
   // Hard execution boundary: supervised actions require a persisted user approval.
@@ -350,7 +432,7 @@ async function processAction(state, approved) {
   if (await isStopped()) return;
   await writeTaskState({ ...state, phase: "executing" });
   let result;
-  try { result = await executeAction(state.action); }
+  try { result = await executeAction(state.action, state.id); }
   catch (error) { result = { ok: false, error: String(error.message || error) }; }
   const steps = Number(state.steps || 0) + 1;
   const lastResult = { action: state.action.action, arguments: state.action.arguments, result };
