@@ -84,3 +84,31 @@ test("requires a genuinely new ChatGPT DOM identity after a context-window hando
   assert.equal(isChatGPTContinuationReady(null, null, true), true);
   assert.equal(isChatGPTContinuationReady("conversation-old", null, true), false);
 });
+
+
+test("detects a newly rendered ChatGPT user turn after Send", () => {
+  const { hasNewUserMessage } = require("../provider-adapters.js");
+  const submitted = "AGENTOS TASK CONTINUATION — SAME TASK, POSSIBLY NEW CONVERSATION";
+  assert.equal(hasNewUserMessage(
+    ["Earlier message", submitted + " Follow the original task."],
+    ["Earlier message"],
+    submitted
+  ), true);
+});
+
+test("does not treat a pre-existing matching user message as a new submission", () => {
+  const { hasNewUserMessage } = require("../provider-adapters.js");
+  const submitted = "AGENTOS TASK CONTINUATION — SAME TASK";
+  assert.equal(hasNewUserMessage(
+    [submitted + " Keep going."],
+    [submitted + " Keep going."],
+    submitted
+  ), false);
+});
+
+test("recognizes ChatGPT stop-button test identifiers without matching unrelated Stop controls", () => {
+  const { isGenerationControlLabel } = require("../provider-adapters.js");
+  assert.equal(isGenerationControlLabel("stop-button"), true);
+  assert.equal(isGenerationControlLabel("stop_generating_button"), true);
+  assert.equal(isGenerationControlLabel("Stop sharing"), false);
+});
