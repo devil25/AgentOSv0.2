@@ -28,6 +28,41 @@
       }
     };
   }
+  function buildTaskRunContext(prompt, taskId) {
+    const source = String(prompt || "");
+    const testId = source.match(/\\bTest ID\\s*:\\s*([A-Za-z0-9][A-Za-z0-9._-]*)/i)?.[1] || null;
+    const stageMatch = source.match(/\\b(\\d{1,3})\\s+stages?\\b|\\b(?:stage|step)\\s*0*1\\s*\\/\\s*(\\d{1,3})/i);
+    const stageCount = Number(stageMatch?.[1] || stageMatch?.[2] || 0);
+    const folderMatch = source.match(/(?:create an isolated folder|أنشئ مجلداً مستقلاً|أنشئ مجلدًا مستقلاً)\\s*[:：]\\s*([^\\r\\n]+)/i);
+    if (!testId || stageCount < 2 || !folderMatch) return null;
+
+    const requestedFolder = folderMatch[1].trim().replace(/^[-*]\\s*/, "").replace(/^["']|["']$/g, "");
+    if (!requestedFolder || /^[A-Za-z]:/.test(requestedFolder) ||
+        /^[\\\\/]/.test(requestedFolder) ||
+        requestedFolder.split(/[\\\\/]/).some(part => part === "." || part === "..")) return null;
+
+    const safeTaskId = String(taskId || "").trim();
+    if (!/^task-[A-Za-z0-9-]+$/.test(safeTaskId)) return null;
+    return {
+      testId,
+      stageCount,
+      runEvidenceDirectory: requestedFolder.replace(/\\\\/g, "/").replace(/\\/+$/, "") + "/runs/" + safeTaskId
+    };
+  }
+
+  function buildInitialTaskPrompt(state, prompt) {
+    if (!state?.runEvidenceDirectory) return String(prompt || "");
+    return [
+      String(prompt || ""),
+      "AGENTOS RUN-SCOPED ARTIFACT ISOLATION:",
+      "This is a distinct test run. Its canonical AgentOS task ID is " + String(state.id) + ".",
+      "The exclusive workspace-relative directory for ALL files created or modified by this run is: " + state.runEvidenceDirectory + ".",
+      "Keep the pre-existing test-root files and every other run directory read-only. Do not overwrite, edit, rename, or delete any root-level manifest, stages, reports, evidence, or files belonging to another run.",
+      "Create this run's manifest.json, stages/, reports/, and evidence/ only inside the run-specific directory above. If older root-level artifacts exist, preserve them as historical evidence and do not treat them as this run's outputs.",
+      "Use the same run-specific directory after every automatic context handoff. Never derive or change it from a conversation ID."
+    ].join("\\n\\n");
+  }
+
   function buildContinuationPrompt(state, latestResult = null) {
     const originalPrompt =
       typeof state?.initialPrompt === "string" && state.initialPrompt.trim()
@@ -62,6 +97,13 @@
       "Compare task IDs only after confirming that the artifact belongs to this run. A stale or foreign artifact ID is an artifact-contamination finding; it is not proof that AgentOS changed the current task identity and must not cause you to restart the task or falsely fail a verified handoff.",
       "A task-identity continuity failure may be reported only if the canonical AgentOS task ID in the persisted AgentOS continuation state actually changes. If the state ID is unavailable, report UNKNOWN; do not substitute an ID from workspace evidence.",
       "Before finalizing, report canonical_task_id, artifact_task_ids, artifact_run_binding, and task_identity_continuity separately. Keep all original conflicting evidence intact.",
+      ...(state?.runEvidenceDirectory ? [
+        "RUN-SCOPED ARTIFACT ISOLATION (persisted for this exact AgentOS task):",
+        "Test ID: " + String(state.testId || "unknown"),
+        "Exclusive workspace-relative run directory: " + state.runEvidenceDirectory,
+        "Keep the test root and every other run directory read-only. Write this run's manifest, stages, reports, and evidence only inside the run directory. Never overwrite historical root-level artifacts or another run's files.",
+        "Preserve this exact directory across all conversation handoffs; do not derive a replacement from conversation or runtime IDs."
+      ] : []),
       "PERSISTED STAGE LEDGER (authoritative; never re-run a stage recorded as passed):",
       JSON.stringify(state?.stageLedger || {}, null, 2),
       "AUTOMATIC CONTEXT HANDOFF EVENT LEDGER (provider-confirmed evidence only):",
@@ -240,7 +282,7 @@
   }
 
   const api = Object.freeze({
-    buildContinuationPrompt,
+    buildTaskRunContext,\n    buildInitialTaskPrompt,\n    buildContinuationPrompt,
     requiresAgentAction,
     requiresUnfinishedStagedTask,
     nextNonActionRetryCount,
