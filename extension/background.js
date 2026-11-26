@@ -730,7 +730,55 @@ async function checkAwaitingModelResponse() {
   if (responseReconcileInFlight) return { ok: true, checked: false, reason: "response-check-already-running" };
   responseReconcileInFlight = true;
   try {
-    const state = await readTaskState();
+    let state = await readTaskState();
+    const ambiguousSubmitResult = state?.phase === "error" &&
+      state.promptSubmissionStage === "submitting the prompt" &&
+      /could not verify that ChatGPT accepted the prompt|did not confirm submission/i.test(state.error || "") &&
+      !state.action && !state.response &&
+      Array.isArray(state.baseline);
+
+    // Manual recovery path for an ambiguous Send confirmation. Inspect the
+    // same conversation and saved pre-submit baseline; never click Send again.
+    if (ambiguousSubmitResult) {
+      const info = await tabRequest(state.tabId, "AGENTOS_PROVIDER_INSPECT");
+      if (!info?.ok || info.provider !== state.provider ||
+          !sameConversation(state, info.provider, info.url, info.conversationId)) {
+        return {
+          ok: true, checked: true, reason: "original-conversation-not-confirmed",
+          state
+        };
+      }
+      const snapshot = await readProviderMessages(state.tabId);
+      const response = responseDelta(
+        snapshot.messages,
+        state.baseline || [],
+        snapshot.messageIds || [],
+        state.baselineMessageIds || []
+      );
+      if (!response) {
+        return {
+          ok: true, checked: true, reason: "ambiguous-submit-no-new-response",
+          state
+        };
+      }
+      state = await writeTaskState({
+        ...state,
+        phase: "awaiting_model",
+        error: null,
+        promptSubmissionStage: "submitted-unconfirmed"
+      });
+      const recovered = await handleAssistantSnapshot(
+        state.tabId, snapshot.messages, snapshot.url, snapshot.strategy,
+        snapshot.continuationMarker, snapshot.messageIds, snapshot.conversationId
+      );
+      return {
+        ...recovered,
+        checked: true,
+        reason: recovered.reason || "late-response-recovered",
+        state: await readTaskState()
+      };
+    }
+
     if (!state || state.phase !== "awaiting_model") {
       return { ok: true, checked: false, reason: "task-not-awaiting-model", state: state || null };
     }
